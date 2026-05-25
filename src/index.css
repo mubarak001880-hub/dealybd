@@ -1,0 +1,228 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Plus Jakarta Sans", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Plus Jakarta Sans", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  /* Premium royal light theme colors mapping for beautiful contrast */
+  --color-white: #ffffff;
+  --color-slate-50: #f8fafc;
+  --color-slate-100: #f1f5f9;
+  --color-slate-200: #e2e8f0;
+  --color-slate-300: #cbd5e1;
+  --color-slate-400: #94a3b8;
+  --color-slate-500: #64748b;
+  --color-slate-600: #475569;
+  --color-slate-700: #334155;
+  --color-slate-800: #1e293b;
+  --color-slate-900: #0f172a;
+  --color-slate-950: #020617;
+
+  --color-neutral-50: #fafafa;
+  --color-neutral-100: #f5f5f5;
+  --color-neutral-200: #e5e5e5;
+  --color-neutral-300: #d4d4d4;
+  --color-neutral-400: #a3a3a3;
+  --color-neutral-500: #737373;
+  --color-neutral-600: #525252;
+  --color-neutral-700: #404040;
+  --color-neutral-800: #262626;
+  --color-neutral-900: #171717;
+  --color-neutral-950: #0a0a0a;
+
+  /* Premium custom vibrant pink accent (corresponds to user's screenshot) */
+  --color-pink-50: #fdf2f8;
+  --color-pink-100: #fce7f3;
+  --color-pink-200: #fbcfe8;
+  --color-pink-300: #f9a8d4;
+  --color-pink-400: #f472b6;
+  --color-pink-500: #e21b70; /* Crisp Bangladesh/Global Master Hot Pink */
+  --color-pink-600: #db2777;
+  --color-pink-700: #be123c;
+  --color-pink-850: #9f1239;
+  --color-pink-900: #881337;
+
+  /* Rose gradient mapping to coordinates with hot pink nicely */
+  --color-rose-50: #fff1f2;
+  --color-rose-500: #f43f5e;
+  --color-rose-600: #e11d48;
+
+  /* Indigo gradient mapping */
+  --color-indigo-50: #f5f3ff;
+  --color-indigo-100: #ede9fe;
+  --color-indigo-500: #6366f1;
+  --color-indigo-600: #4f46e5;
+  --color-indigo-700: #4338ca;
+  --color-indigo-800: #3730a3;
+  --color-indigo-900: #312e81;
+
+  --color-purple-500: #4f46e5;
+  --color-purple-600: #4338ca;
+}
+
+/* CSS Global Selectors & Utilities Override - PRISTINE LIGHT MODE AESTHETICS */
+html, body, #root {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  font-family: "Inter", var(--font-sans);
+  min-height: 100vh;
+}
+
+body {
+  background-color: #ffffff !important;
+  color: #334155 !important;
+}
+
+/* HIGHLY VISIBLE & USER FRIENDLY FORM INPUTS OVERRIDES */
+input, select, textarea {
+  color: #0f172a !important; /* Rich Dark visible text */
+  background-color: #ffffff !important; /* Pure white background */
+  border: 2px solid #cbd5e1 !important; /* Highly visible, solid soft slate border outline */
+  border-radius: 0.75rem !important; /* Smooth professional curves */
+  padding: 0.625rem 0.875rem !important; /* Generous comfortable writing space */
+  font-weight: 500 !important;
+  font-size: 0.875rem !important; /* Easily legible font sizes */
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  box-sizing: border-box !important;
+}
+
+/* Pronounced highlighting when user focuses on empty input fields */
+input:focus, select:focus, textarea:focus {
+  border-color: #e21b70 !important; /* Premium brand Hot Pink outline */
+  background-color: #ffffff !important;
+  box-shadow: 0 0 0 4px rgba(226, 27, 112, 0.18) !important; /* High contrast indicator ring */
+  outline: none !important;
+}
+
+/* Placed clearly inside placeholder hints */
+input::placeholder, textarea::placeholder {
+  color: #94a3b8 !important; /* Visible light-slate placeholder text */
+  font-weight: 400 !important;
+}
+
+/* Fix misalignment and messy form layouts by forcing labels and inputs to block-stack */
+.form-group {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  gap: 0.25rem !important;
+  width: 100% !important;
+  margin-bottom: 0.5rem !important;
+}
+
+.form-label {
+  display: block !important;
+  width: 100% !important;
+  text-align: left !important;
+  font-size: 0.75rem !important;
+  font-weight: 600 !important;
+  color: #1e293b !important; /* Clear Slate-800 typography contrast */
+  margin-bottom: 0.25rem !important;
+}
+
+.form-input {
+  display: block !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+/* Styled clean scrollbar for light aesthetics */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Support for tables in lights */
+table {
+  border-color: #e2e8f0 !important;
+}
+thead {
+  background-color: #f1f5f9 !important;
+}
+tr {
+  background-color: #ffffff !important;
+  border-color: #e2e8f0 !important;
+}
+th {
+  color: #475569 !important;
+  border-bottom: 2px solid #e2e8f0 !important;
+}
+td {
+  border-bottom: 1px solid #e2e8f0 !important;
+  color: #334155 !important;
+}
+tr:hover {
+  background-color: #f8fafc !important;
+}
+
+/* Override background colors for layouts */
+.bg-slate-50, .bg-gray-50 {
+  background-color: #f8fafc !important;
+}
+.bg-slate-100, .bg-gray-100 {
+  background-color: #f1f5f9 !important;
+}
+.bg-white {
+  background-color: #ffffff !important;
+}
+.border-slate-800, .border-slate-900, .border-slate-950 {
+  border-color: #e2e8f0 !important;
+}
+
+/* High contrast headings */
+h1, h2, h3, h4, h5, h6 {
+  font-family: "Plus Jakarta Sans", var(--font-display) !important;
+  color: #0f172a;
+}
+
+/* Modal and popups styles in light format with nice drop-shadow and semi-transparent dark overlay */
+div[class*="bg-slate-950/60"], 
+div[class*="bg-slate-900/50"], 
+div[class*="bg-black/50"], 
+div[class*="bg-black/40"] {
+  background-color: rgba(15, 23, 42, 0.4) !important; /* Pure modern light backdrop blur trans */
+  backdrop-filter: blur(8px) !important;
+}
+
+/* Card shadows */
+.shadow-lg, .shadow-xl, .shadow-2xl {
+  box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.08), 0 8px 10px -6px rgba(15, 23, 42, 0.08) !important;
+}
+
+/* Custom scrollbar utility for smooth horizontal touch scrolling */
+.scroll-x-container {
+  display: flex !important;
+  overflow-x: auto !important;
+  -webkit-overflow-scrolling: touch !important;
+  scroll-behavior: smooth !important;
+  flex-wrap: nowrap !important;
+  gap: 0.625rem; /* 10px */
+}
+.scroll-x-container::-webkit-scrollbar {
+  height: 5px !important;
+  display: block !important;
+}
+.scroll-x-container::-webkit-scrollbar-track {
+  background: #f1f5f9 !important;
+  border-radius: 9999px !important;
+}
+.scroll-x-container::-webkit-scrollbar-thumb {
+  background: #ec4899 !important; /* matches Orivian pink theme perfectly */
+  border-radius: 9999px !important;
+}
+.scroll-x-container::-webkit-scrollbar-thumb:hover {
+  background: #db2777 !important;
+}
+

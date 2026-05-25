@@ -1,0 +1,6 @@
+{
+  "name": "Orivian Store",
+  "description": "A high-end, professional reselling and ecommerce platform featuring real-time order tracking, comprehensive reseller workflows with KYC verification, custom profit margins, withdrawal management, and an advanced admin controller dashboard.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
