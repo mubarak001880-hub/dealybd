@@ -281,10 +281,10 @@ export default function UserPanel({
         <div className="max-w-7xl mx-auto px-3 sm:px-6 h-13 sm:h-16 flex items-center justify-between">
           <div className="flex items-center gap-1.5 sm:gap-3 min-w-0">
             <div className="w-7 h-7 sm:w-9 sm:h-9 bg-pink-500 rounded-lg sm:rounded-xl flex items-center justify-center text-white text-xs sm:text-sm font-black animate-pulse shrink-0">
-              OR
+              DL
             </div>
             <span className="font-extrabold text-[11px] sm:text-sm md:text-base lg:text-lg tracking-tight uppercase text-pink-600 truncate">
-              ORIVIAN <span className="text-slate-800">PARTNER HUB</span>
+              DEALY <span className="text-slate-800">PARTNER HUB</span>
             </span>
           </div>
 

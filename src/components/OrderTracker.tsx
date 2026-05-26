@@ -101,7 +101,7 @@ export default function OrderTracker({ orders, onTrackClose, defaultTrackingId =
       {!embedded && (
         <div className="flex justify-between items-center mb-6 pb-4 border-b border-slate-100">
           <div>
-            <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">Orivian Logistics Tracker</h2>
+            <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">Dealy Logistics Tracker</h2>
             <p className="text-xs text-slate-400">Scan real-time warehousing and delivery status instantly</p>
           </div>
           {onTrackClose && (

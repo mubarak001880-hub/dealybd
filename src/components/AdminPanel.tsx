@@ -830,7 +830,7 @@ export default function AdminPanel({
     const mockReseller: User = {
       id: 'u_' + Date.now(),
       name: app.name,
-      email: `${app.phone}@orivian.com`, // Quick placeholder email
+      email: `${app.phone}@dealy.com`, // Quick placeholder email
       pass: '123',
       role: 'user',
       idCode: rCode,
@@ -851,8 +851,8 @@ export default function AdminPanel({
       {/* SIDEBAR CONTAINER */}
       <aside className="w-72 bg-slate-900 text-white flex flex-col z-10 shadow-xl overflow-y-auto">
         <div className="p-6 border-b border-slate-800 bg-slate-950 flex items-center gap-3">
-          <div className="w-9 h-9 bg-pink-500 rounded-lg flex items-center justify-center font-black">OR</div>
-          <span className="font-extrabold text-lg flex flex-col leading-none">ORIVIAN <span className="text-[10px] uppercase font-bold text-slate-400 mt-1 tracking-widest">Global Admin</span></span>
+          <div className="w-9 h-9 bg-pink-500 rounded-lg flex items-center justify-center font-black">DL</div>
+          <span className="font-extrabold text-lg flex flex-col leading-none">DEALY <span className="text-[10px] uppercase font-bold text-slate-400 mt-1 tracking-widest">Global Admin</span></span>
         </div>
 
         <nav className="flex-1 p-4 space-y-1">
@@ -1943,7 +1943,7 @@ export default function AdminPanel({
                             {/* Meta header */}
                             <div className="flex justify-between items-center flex-wrap gap-2 pb-3 border-b border-zinc-100">
                               <div>
-                                <p className="text-[10px] text-zinc-400 font-bold">ORIVIAN TRACKING REF</p>
+                                <p className="text-[10px] text-zinc-400 font-bold">DEALY TRACKING REF</p>
                                 <h4 className="font-extrabold text-sm text-slate-800 font-mono">
                                   {o.trackingId}
                                   <span className={`text-[9px] px-2.5 py-0.5 rounded-full font-black border ml-2 ${subColor}`}>

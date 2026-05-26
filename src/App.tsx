@@ -23,19 +23,19 @@ const initialDeliveryCharges: DeliveryCharge[] = [
 ];
 
 const initialFooterConfig: FooterConfig = {
-  aboutUs: "Welcome to Orivian Distribution, Bangladesh's leading standard reselling and wholesale distribution network. We provide curated, high-margin, top-tier products to help our resellers start businesses with zero investment.",
-  facebook: "https://facebook.com/oriviandistribution",
-  youtube: "https://youtube.com/oriviandistribution",
-  contactEmail: "support@orivian.com",
+  aboutUs: "Welcome to Dealy Distribution, Bangladesh's leading standard reselling and wholesale distribution network. We provide curated, high-margin, top-tier products to help our resellers start businesses with zero investment.",
+  facebook: "https://facebook.com/dealydistribution",
+  youtube: "https://youtube.com/dealydistribution",
+  contactEmail: "support@dealy.com",
   contactPhone: "+8801711223344",
   privacyPolicy: "We value customer trust and guarantee safe warehousing, quality checks, and real-time logistics tracking parameters, protecting your business data integrity.",
   joinResellerBanner: "Start your independent reselling journey today. Place orders, track active commission payouts, and boost family earnings with zero stock load.",
   brandLogoUrl: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&q=80",
   customLinks: [
     { name: "Official WhatsApp Support Helpline", url: "https://wa.me/8801735165971" },
-    { name: "Official Telegram Channel Hub", url: "https://t.me/oriviandistribution" },
-    { name: "Resellers Facebook Community Group", url: "https://facebook.com/oriviandistribution" },
-    { name: "YouTube Tutorials & Trainings Channel", url: "https://youtube.com/oriviandistribution" }
+    { name: "Official Telegram Channel Hub", url: "https://t.me/dealydistribution" },
+    { name: "Resellers Facebook Community Group", url: "https://facebook.com/dealydistribution" },
+    { name: "YouTube Tutorials & Trainings Channel", url: "https://youtube.com/dealydistribution" }
   ]
 };
 
@@ -53,7 +53,7 @@ const initialAdvanceConfig: AdvanceConfig = {
 };
 
 const initialPromoCodes: PromoCode[] = [
-  { id: 'p_1', code: 'ORIVIAN50', discountType: 'fixed', discountValue: 50, maxUses: 100, usedCount: 15, isActive: true },
+  { id: 'p_1', code: 'DEALY50', discountType: 'fixed', discountValue: 50, maxUses: 100, usedCount: 15, isActive: true },
   { id: 'p_2', code: 'EID2026', discountType: 'percent', discountValue: 10, maxUses: 50, usedCount: 8, isActive: true }
 ];
 

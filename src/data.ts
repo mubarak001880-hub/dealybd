@@ -49,7 +49,7 @@ export const initialProducts: Product[] = [
   {
     id: 'p3',
     catId: 'cat3',
-    name: 'Orivian Glass Prism Hourglass Pendant Decor',
+    name: 'Dealy Glass Prism Hourglass Pendant Decor',
     description: 'An elegant architectural handblown glass sculpture filled with fine golden metallic stardust. Watch time flow through cascading orbits, creating a sophisticated desktop centerpiece.',
     img: 'https://images.unsplash.com/photo-1513519245088-0e12902e5a38?w=500&q=80',
     originalPrice: 3800,
@@ -83,7 +83,7 @@ export const initialProducts: Product[] = [
   {
     id: 'p_eid_1',
     catId: 'cat_eid',
-    name: 'Orivian Royal Gilded Rose Table Lamp',
+    name: 'Dealy Royal Gilded Rose Table Lamp',
     description: 'An exquisite gold-gilded metallic rose encrusted within premium tempered glass. Projects shimmering floral light patterns across bedrooms, ideal for festive celebrations.',
     img: 'https://images.unsplash.com/photo-1507473885765-e6ed057f782c?w=500&q=80',
     originalPrice: 3200,
@@ -100,7 +100,7 @@ export const initialProducts: Product[] = [
   {
     id: 'p_free_1',
     catId: 'cat_free',
-    name: 'Orivian Floating Magnetic Moon Lamp Hub',
+    name: 'Dealy Floating Magnetic Moon Lamp Hub',
     description: 'A levitating 3D printed moon replica rotating seamlessly above a dark solid walnut wood dock. Features wireless inductive power Transfer technology.',
     img: 'https://images.unsplash.com/photo-1532926381893-754475a7ef25?w=500&q=80',
     originalPrice: 4800,
@@ -117,7 +117,7 @@ export const initialProducts: Product[] = [
   {
     id: 'p_flash_1',
     catId: 'cat_flash',
-    name: 'Orivian Retro Wood Cabinet Desk Radio Clock',
+    name: 'Dealy Retro Wood Cabinet Desk Radio Clock',
     description: 'Premium mini desk clock with Bluetooth radio functionality, wrapped inside vintage solid birchwood cabinet panels. Experience raw authentic acoustic soundscapes.',
     img: 'https://images.unsplash.com/photo-1518609878373-06d740f60d8b?w=500&q=80',
     originalPrice: 3600,
@@ -175,7 +175,7 @@ export const initialBanners: Banner[] = [
 export const initialUsers: User[] = [
   {
     id: 'admin1',
-    name: 'Orivian Executive Partner',
+    name: 'Dealy Executive Partner',
     email: 'admin@panel.com',
     pass: '123', // Will be hashed via simple password check or compared directly
     role: 'admin',
@@ -237,13 +237,13 @@ export const generateTrackingId = (): string => {
   const num = Math.floor(100000 + Math.random() * 900000);
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
   const last = chars.charAt(Math.floor(Math.random() * chars.length)) + chars.charAt(Math.floor(Math.random() * chars.length));
-  return `ORV-${num}-${last}`;
+  return `DLY-${num}-${last}`;
 };
 
 export const createInitialTimeline = (dateStr: string): any[] => {
   return [
     { status: 'Pending', date: dateStr, description: 'Order created successfully. Awaiting seller processing.', isCompleted: true },
-    { status: 'Approved', date: '', description: 'Order reviewed and confirmed by Orivian partner.', isCompleted: false },
+    { status: 'Approved', date: '', description: 'Order reviewed and confirmed by Dealy partner.', isCompleted: false },
     { status: 'Processing', date: '', description: 'Package is wrapped, quality-verified, and sorted in hub.', isCompleted: false },
     { status: 'Shipped', date: '', description: 'Dispatched with local express service. Tracking code active.', isCompleted: false },
     { status: 'Delivered', date: '', description: 'Parcel delivered successfully to custom destination.', isCompleted: false }
@@ -253,7 +253,7 @@ export const createInitialTimeline = (dateStr: string): any[] => {
 export const initialOrders: Order[] = [
   {
     id: 'o_demo1',
-    trackingId: 'ORV-723519-TX',
+    trackingId: 'DLY-723519-TX',
     type: 'reseller',
     userId: 'reseller1',
     productName: 'CASIFY G3 Mini Ambient Smart Light & Alarm (x1)',
@@ -271,15 +271,15 @@ export const initialOrders: Order[] = [
     date: '2026-05-18 10:20',
     timeline: [
       { status: 'Pending', date: '2026-05-18 10:20', description: 'Order created successfully. Awaiting seller processing.', isCompleted: true },
-      { status: 'Approved', date: '2026-05-18 13:45', description: 'Order reviewed and confirmed by Orivian partner.', isCompleted: true },
+      { status: 'Approved', date: '2026-05-18 13:45', description: 'Order reviewed and confirmed by Dealy partner.', isCompleted: true },
       { status: 'Processing', date: '2026-05-18 16:30', description: 'Package is wrapped, quality-verified, and sorted in hub.', isCompleted: true },
-      { status: 'Shipped', date: '2026-05-19 09:00', description: 'Dispatched with local DHL Express. Tracking code: DHL-ORV-3914.', isCompleted: true },
+      { status: 'Shipped', date: '2026-05-19 09:00', description: 'Dispatched with local DHL Express. Tracking code: DHL-DLY-3914.', isCompleted: true },
       { status: 'Delivered', date: '2026-05-19 14:30', description: 'Parcel delivered successfully to Kamal Uddin.', isCompleted: true }
     ]
   },
   {
     id: 'o_demo2',
-    trackingId: 'ORV-891024-AQ',
+    trackingId: 'DLY-891024-AQ',
     type: 'customer',
     productName: 'Sleek Wood Block Wireless Induction Speaker (x1)',
     prodImg: 'https://images.unsplash.com/photo-1608043152269-423dbba4e7e1?w=500&q=80',
@@ -303,7 +303,7 @@ export const initialOrders: Order[] = [
   },
   {
     id: 'o_demo3',
-    trackingId: 'ORV-401923-LM',
+    trackingId: 'DLY-401923-LM',
     type: 'reseller',
     userId: 'reseller1',
     productName: 'Ducky Glow Soft Silicon Bedroom Night Light (x2)',
@@ -321,7 +321,7 @@ export const initialOrders: Order[] = [
     date: '2026-05-21 11:20',
     timeline: [
       { status: 'Pending', date: '2026-05-21 11:20', description: 'Order created successfully. Awaiting seller processing.', isCompleted: true },
-      { status: 'Approved', date: '', description: 'Order reviewed and confirmed by Orivian partner.', isCompleted: false },
+      { status: 'Approved', date: '', description: 'Order reviewed and confirmed by Dealy partner.', isCompleted: false },
       { status: 'Processing', date: '', description: 'Package is wrapped, quality-verified, and sorted in hub.', isCompleted: false },
       { status: 'Shipped', date: '', description: 'Dispatched with local express service. Tracking code active.', isCompleted: false },
       { status: 'Delivered', date: '', description: 'Parcel delivered successfully to custom destination.', isCompleted: false }

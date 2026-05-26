@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   ShoppingCart, Search, LogIn, LogOut, ArrowRight, ArrowLeft, UserCheck, 
@@ -428,7 +428,7 @@ const SslPaymentPortal: React.FC<SslPaymentPortalProps> = ({ amount, onCancel, o
         <div className="bg-white rounded-xl border border-slate-200 p-12 shadow-3xs text-center space-y-4">
           <Loader2 className="w-12 h-12 text-pink-500 mx-auto mb-3 animate-spin" />
           <h4 className="font-extrabold text-sm text-slate-900 duration-1000 animate-pulse uppercase tracking-wider">Verifying Gateway Socket API...</h4>
-          <p className="text-[11.5px] text-slate-505 text-slate-500">Contacting Orivian payment integration endpoints through SSL Wireless secure tunnel. Do not close or refresh this page.</p>
+          <p className="text-[11.5px] text-slate-505 text-slate-500">Contacting Dealy payment integration endpoints through SSL Wireless secure tunnel. Do not close or refresh this page.</p>
         </div>
       )}
 
@@ -446,7 +446,7 @@ const SslPaymentPortal: React.FC<SslPaymentPortalProps> = ({ amount, onCancel, o
 
           <div className="bg-slate-50 p-3 rounded-xl border border-slate-150 text-[10px] text-slate-500 text-left space-y-1">
             <span className="font-black text-slate-705 text-slate-700 uppercase tracking-widest block border-b pb-1 mb-1">Receipt details</span>
-            <div>Payee: <b className="text-slate-800">Orivian Ltd Reseller Program</b></div>
+            <div>Payee: <b className="text-slate-800">Dealy Ltd Reseller Program</b></div>
             <div>Reference: <b className="text-slate-800 font-mono font-sans">RES_{phone}</b></div>
             <div>Time: <b className="text-slate-805 text-slate-800 font-mono font-sans">{new Date().toLocaleString()}</b></div>
           </div>
@@ -534,6 +534,10 @@ export default function CustomerStore({
   const [checkoutDistrictId, setCheckoutDistrictId] = useState<string>('');
   const [selectedCartIds, setSelectedCartIds] = useState<string[]>([]);
   const [clickedPayToConfirm, setClickedPayToConfirm] = useState(false);
+
+  // Promo code customer states
+  const [promoCodeInput, setPromoCodeInput] = useState('');
+  const [appliedPromo, setAppliedPromo] = useState<PromoCode | null>(null);
 
   // Language & SSL payment gateway states
   const [lang, setLang] = useState<'en' | 'bn'>('en');
@@ -865,6 +869,16 @@ export default function CustomerStore({
 
     const totalAmount = selectedCartItems.reduce((acc, item) => acc + item.product.discountPrice * item.qty, 0);
     
+    let promoDiscount = 0;
+    if (appliedPromo) {
+      if (appliedPromo.discountType === 'percent') {
+        promoDiscount = Math.round((totalAmount * appliedPromo.discountValue) / 100);
+      } else {
+        promoDiscount = appliedPromo.discountValue;
+      }
+    }
+    const finalProductTotal = Math.max(0, totalAmount - promoDiscount);
+
     const matchedDistrict = deliveryCharges.find(dc => dc.id === checkoutDistrictId);
     const deliveryCostAmount = matchedDistrict ? matchedDistrict.charge : 0;
 
@@ -911,9 +925,9 @@ export default function CustomerStore({
       productName: orderItemsName,
       prodImg: selectedCartItems[0]?.product.img,
       qty: selectedCartItems.reduce((s, i) => s + i.qty, 0),
-      sellRate: totalAmount + deliveryCostAmount,
+      sellRate: finalProductTotal + deliveryCostAmount,
       profit: 0, // Direct customer purchases hold zero reseller profit margins
-      amount: totalAmount + deliveryCostAmount,
+      amount: finalProductTotal + deliveryCostAmount,
       ...orderDetailsObj,
       custAddress: districtCombinedAddress,
       status: 'Pending',
@@ -926,6 +940,13 @@ export default function CustomerStore({
 
     setOrders((prev) => [...prev, newOrder]);
     
+    // Increment promo usage counter if applicable
+    if (appliedPromo) {
+      setPromoCodes(prev => prev.map(p => p.id === appliedPromo.id ? { ...p, usedCount: p.usedCount + 1 } : p));
+      setAppliedPromo(null);
+      setPromoCodeInput('');
+    }
+
     // Remove only the selected items from the cart
     setCart((prev) => prev.filter((item) => !selectedCartIds.includes(item.cartId)));
     setSelectedCartIds([]);
@@ -1025,6 +1046,58 @@ export default function CustomerStore({
   const matchedCheckoutDistrict = deliveryCharges.find(dc => dc.id === checkoutDistrictId);
   const activeShippingCharge = matchedCheckoutDistrict ? matchedCheckoutDistrict.charge : 0;
   const cartTotal = cartSubtotal + (selectedCartItems.length > 0 ? activeShippingCharge : 0);
+
+  const promoDiscountAmount = useMemo(() => {
+    if (!appliedPromo) return 0;
+    if (appliedPromo.discountType === 'percent') {
+      return Math.round((cartSubtotal * appliedPromo.discountValue) / 100);
+    } else {
+      return appliedPromo.discountValue;
+    }
+  }, [appliedPromo, cartSubtotal]);
+
+  const handleApplyPromoCode = () => {
+    if (!promoCodes || promoCodes.length === 0) {
+      showNotif(lang === 'en' ? "No promotional codes are currently configured." : "আপাতত কোনো প্রোমো কোড সক্রিয় নেই।", "error");
+      return;
+    }
+    const code = promoCodeInput.trim().toUpperCase();
+    if (!code) {
+      showNotif(lang === 'en' ? "Please enter a promo code first." : "অনুগ্রহ করে প্রথমে একটি প্রোমো কোড দিন।", "error");
+      return;
+    }
+
+    const found = promoCodes.find(p => p.code.toUpperCase() === code);
+    if (!found) {
+      showNotif(lang === 'en' ? "Invalid promo code." : "ভুল বা অকার্যকর প্রোমো কোড।", "error");
+      return;
+    }
+
+    if (!found.isActive) {
+      showNotif(lang === 'en' ? "This promo code is currently inactive." : "এই প্রোমো কোডটি বর্তমানে নিষ্ক্রিয় রয়েছে।", "error");
+      return;
+    }
+
+    if (found.usedCount >= found.maxUses) {
+      showNotif(lang === 'en' ? "This promo code has reached its usage limit." : "এই প্রোমো কোড ব্যবহারের সীমা অতিক্রম হয়েছে।", "error");
+      return;
+    }
+
+    // Success
+    setAppliedPromo(found);
+    showNotif(
+      lang === 'en'
+        ? `Promo code "${found.code}" applied successfully! You got ৳${found.discountType === 'percent' ? `${found.discountValue}%` : found.discountValue} discount.`
+        : `প্রোমো কোড "${found.code}" সফলভাবে প্রয়োগ করা হয়েছে! আপনি ৳${found.discountType === 'percent' ? `${found.discountValue}%` : found.discountValue} ছাড় পেয়েছেন।`,
+      "success"
+    );
+  };
+
+  const handleRemovePromoCode = () => {
+    setAppliedPromo(null);
+    setPromoCodeInput('');
+    showNotif(lang === 'en' ? "Promo code removed." : "প্রোমো কোড মুছে ফেলা হয়েছে।", "success");
+  };
 
   const viewDetails = (prod: Product) => {
     setViewingProduct(prod);
@@ -1157,7 +1230,7 @@ export default function CustomerStore({
         )}
       </AnimatePresence>
 
-           {/* HEADER NAVBAR */}
+      {/* HEADER NAVBAR */}
       <header className="sticky top-0 z-40 bg-white border-b border-slate-200/80 shadow-xs text-slate-900 select-none">
         {/* Bangladesh Hot Pink top highlight border mimicking brand quality */}
         <div className="h-1 bg-pink-500 w-full" />
@@ -1216,7 +1289,7 @@ export default function CustomerStore({
                        showShopPage ? t("Shop") :
                        showSupportPage ? t("Help & Support") :
                        showOnlyFavorites ? t("Saved Items") :
-                       showCustProfilePage ? t("My Account") : "Orivian"}
+                       showCustProfilePage ? t("My Account") : "Dealy"}
                     </span>
                     <div className="flex-shrink-0 w-8 flex justify-end">
                       {showCartPage && cart.length > 0 && (
@@ -1254,7 +1327,7 @@ export default function CustomerStore({
             ) : (
               /* MAIN STOREFRONT HEADER WITH CLEAN SEARCH BOX & PINK BUTTON (like first screenshot) */
               <div className="flex items-center justify-between w-full gap-2 font-sans">
-                {/* 3-dot menu icon next to Orivian on left */}
+                {/* 3-dot menu icon next to Dealy on left */}
                 <button 
                   type="button"
                   onClick={() => setShowMobileMenu(true)}
@@ -1268,7 +1341,7 @@ export default function CustomerStore({
                   onClick={goHome}
                   className="flex-shrink-0 font-black text-xs xs:text-[13px] tracking-tighter text-pink-500 cursor-pointer uppercase font-display leading-none ml-0.5"
                 >
-                  ORIVIAN
+                  DEALY
                 </div>
 
                 {/* Search input perfectly scaled & aligned */}
@@ -1361,7 +1434,7 @@ export default function CustomerStore({
                 className="cursor-pointer flex flex-col justify-center select-none ml-2"
               >
                 <h1 className="font-black text-lg tracking-tight text-pink-500 font-display leading-none uppercase">
-                  ORIVIAN
+                  DEALY
                 </h1>
                 <span className="text-[9px] font-black text-slate-400 tracking-wider">PREMIUM HUB</span>
               </div>
@@ -2492,7 +2565,7 @@ export default function CustomerStore({
                 {(() => {
                   const matchedDistrict = deliveryCharges.find(dc => dc.id === checkoutDistrictId);
                   const deliveryCostAmount = matchedDistrict ? matchedDistrict.charge : 0;
-                  const finalTotalSum = cartSubtotal + deliveryCostAmount;
+                  const finalTotalSum = Math.max(0, cartSubtotal - promoDiscountAmount) + deliveryCostAmount;
 
                   let totalAdvanceRequired = 0;
                   if (advanceConfig && advanceConfig.requireAdvance) {
@@ -2514,11 +2587,60 @@ export default function CustomerStore({
 
                   return (
                     <>
+                      {/* Promo Code Apply Section */}
+                      <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-2 text-xs">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide block">
+                          {lang === 'en' ? 'Have a Promo Code?' : 'প্রোমো কোড আছে কি?'}
+                        </label>
+                        {appliedPromo ? (
+                          <div className="flex items-center justify-between bg-emerald-50 border border-emerald-250 p-2.5 rounded-lg text-xs leading-none animate-fade-in">
+                            <span className="font-extrabold text-emerald-800 flex items-center gap-1.5 font-mono">
+                              <Tag className="w-3.5 h-3.5 text-emerald-600" />
+                              {appliedPromo.code} {lang === 'en' ? 'Applied' : 'প্রযুক্ত হয়েছে'} (-৳{promoDiscountAmount})
+                            </span>
+                            <button
+                              type="button"
+                              onClick={handleRemovePromoCode}
+                              className="text-red-500 hover:text-red-700 font-extrabold focus:outline-none p-1 cursor-pointer"
+                              title={lang === 'en' ? "Remove Code" : "কোড সরান"}
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              type="text"
+                              value={promoCodeInput}
+                              onChange={(e) => setPromoCodeInput(e.target.value)}
+                              placeholder={lang === 'en' ? "e.g. FLASH100" : "যেমন: FLASH100"}
+                              className="flex-1 bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold uppercase placeholder-slate-400 focus:outline-none focus:border-pink-400 focus:ring-1 focus:ring-pink-400"
+                            />
+                            <button
+                              type="button"
+                              onClick={handleApplyPromoCode}
+                              className="bg-pink-600 hover:bg-pink-700 text-white font-extrabold px-3 py-1.5 rounded-lg text-xs uppercase tracking-wider cursor-pointer transition-colors"
+                            >
+                              {lang === 'en' ? 'Apply' : 'প্রয়োগ'}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
                       <div className="bg-slate-50/50 p-3.5 rounded-xl border border-slate-100/70 space-y-2 text-xs text-slate-500 font-bold">
                         <div className="flex justify-between items-center text-[11px]">
                           <span>Cart Products Subtotal</span>
                           <span className="font-extrabold text-slate-800">৳{cartSubtotal}</span>
                         </div>
+                        {appliedPromo && (
+                          <div className="flex justify-between items-center text-[11px] text-emerald-600 animate-fade-in">
+                            <span className="flex items-center gap-1 font-bold">
+                              <Tag className="w-3.5 h-3.5" />
+                              Promo Code Discount ({appliedPromo.code}):
+                            </span>
+                            <span className="font-mono font-extrabold text-emerald-700">-৳{promoDiscountAmount}</span>
+                          </div>
+                        )}
                         <div className="flex justify-between items-center text-[11px]">
                           <span>Verified Delivery Fee ({matchedDistrict ? matchedDistrict.district : 'Not selected'})</span>
                           <span className="font-extrabold text-indigo-900">৳{deliveryCostAmount}</span>
@@ -2594,7 +2716,7 @@ export default function CustomerStore({
                     />
                     <div className="flex items-center gap-1">
                       <span className="bg-pink-500 text-white text-[9px] font-extrabold px-1 rounded uppercase tracking-wider">Choice</span>
-                      <span className="font-extrabold text-xs text-slate-800">Orivian Bangladesh Outlet ❯</span>
+                      <span className="font-extrabold text-xs text-slate-800">Dealy Bangladesh Outlet ❯</span>
                     </div>
                   </div>
 
@@ -2757,7 +2879,7 @@ export default function CustomerStore({
           {/* 1. Header Hero Segment */}
           <div className="text-center space-y-4 max-w-3xl mx-auto">
             <span className="bg-pink-100 text-pink-700 font-black text-[10px] tracking-widest uppercase px-3.5 py-1.5 rounded-full select-none">
-              Orivian Exclusive Reseller Hub
+              Dealy Exclusive Reseller Hub
             </span>
             <h1 className="text-2xl sm:text-4xl font-black text-slate-900 leading-tight tracking-tight select-text">
               {resellerPageConfig?.title}
@@ -2921,7 +3043,7 @@ export default function CustomerStore({
                     </div>
 
                     <button
-                      onClick={() => showNotif(`Orivian: ${sub.name} subscription checkout trigger is enabled. Please connect with support desk to pay ৳${sub.price}!`, "success")}
+                      onClick={() => showNotif(`Dealy: ${sub.name} subscription checkout trigger is enabled. Please connect with support desk to pay ৳${sub.price}!`, "success")}
                       className="mt-6 w-full bg-slate-900 hover:bg-slate-800 text-white font-extrabold py-3 rounded-2xl text-[10.5px] uppercase tracking-wider active:scale-95 transition-all cursor-pointer"
                     >
                       সাবস্ক্রাইব করুন ➔
@@ -3119,7 +3241,7 @@ export default function CustomerStore({
               <div className="bg-pink-50/50 p-4 border border-pink-100 rounded-2xl">
                 <p className="text-xs font-bold text-pink-950">Assalamu Alaikum 🙏</p>
                 <p className="text-xs text-pink-600 mt-1 leading-relaxed">
-                  Welcome to <b>ORIVIAN</b>. How can we assist you with your orders, reseller support guidelines, or logistics tracking today? Connect directly with support team handlers below!
+                  Welcome to <b>DEALY</b>. How can we assist you with your orders, reseller support guidelines, or logistics tracking today? Connect directly with support team handlers below!
                 </p>
               </div>
 
@@ -3208,7 +3330,7 @@ export default function CustomerStore({
           <div className="bg-gradient-to-br from-indigo-900 to-indigo-950 p-5 rounded-2xl text-white shadow-xl border border-indigo-950">
             <h4 className="font-bold text-sm tracking-wide">Earning Opportunity</h4>
             <p className="text-xs text-indigo-200 mt-1 lines leading-relaxed">
-              Register as an Orivian Sales Partner. Sell directly to your network and withdraw profit straight to bKash!
+              Register as an Dealy Sales Partner. Sell directly to your network and withdraw profit straight to bKash!
             </p>
             <button 
               onClick={openResellerLandingPage}
@@ -3840,9 +3962,9 @@ export default function CustomerStore({
           <div className="space-y-4">
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 bg-gradient-to-r from-pink-500 to-indigo-600 rounded-lg flex items-center justify-center text-white font-extrabold text-xs shadow-md">
-                OR
+                DL
               </div>
-              <span className="text-white font-black text-lg">ORIVIAN DISTRIBUTION</span>
+              <span className="text-white font-black text-lg">DEALY DISTRIBUTION</span>
             </div>
             <p className="text-xs leading-relaxed text-slate-400 font-semibold">
               {footerConfig.aboutUs}
@@ -3923,7 +4045,7 @@ export default function CustomerStore({
         </div>
 
         <div className="max-w-7xl mx-auto px-4 border-t border-slate-800 mt-12 pt-8 flex flex-col md:flex-row justify-between items-center gap-4 text-xs font-medium text-slate-500">
-          <p>&copy; {new Date().getFullYear()} Orivian Logistics. Authorized partner distribution network Bangladesh.</p>
+          <p>&copy; {new Date().getFullYear()} Dealy Logistics. Authorized partner distribution network Bangladesh.</p>
           <div className="flex gap-4 items-center">
             <span className="hover:text-slate-400 cursor-pointer">Terms of Service</span>
             <span className="hover:text-slate-400 cursor-pointer">Privacy Charter</span>
@@ -4064,10 +4186,10 @@ export default function CustomerStore({
               <div className="p-4 bg-gradient-to-r from-pink-500 to-rose-500 text-white flex items-center justify-between shadow-md">
                 <div className="flex items-center gap-2">
                   <div className="w-7 h-7 bg-white/20 rounded-lg flex items-center justify-center font-black text-xs uppercase text-white shadow-inner">
-                    O
+                    D
                   </div>
                   <div>
-                    <h3 className="font-extrabold text-sm uppercase tracking-wide">ORIVIAN</h3>
+                    <h3 className="font-extrabold text-sm uppercase tracking-wide">DEALY</h3>
                   </div>
                 </div>
                 <button 
@@ -4313,7 +4435,7 @@ export default function CustomerStore({
                 <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2">
                   <div>
                     <p className="text-[10px] text-slate-400 font-black uppercase tracking-wider">Merchant Payee</p>
-                    <p className="text-xs font-black text-slate-800">Orivian Limited (Orivian Admin)</p>
+                    <p className="text-xs font-black text-slate-800">Dealy Limited (Dealy Admin)</p>
                     <p className="text-[10px] font-bold text-slate-500 mt-0.5">Purpose: <b className="text-pink-505 text-pink-500">{sslPaymentData.title}</b></p>
                   </div>
                   <div className="text-right flex flex-row sm:flex-col justify-between sm:justify-center items-center sm:items-end bg-pink-50/50 sm:bg-transparent p-2 sm:p-0 rounded-lg">
@@ -4811,7 +4933,7 @@ export default function CustomerStore({
                   {(() => {
                     const matchedDistrict = deliveryCharges.find(dc => dc.id === checkoutDistrictId);
                     const deliveryCostAmount = matchedDistrict ? matchedDistrict.charge : 0;
-                    const finalTotalSum = cartSubtotal + deliveryCostAmount;
+                    const finalTotalSum = Math.max(0, cartSubtotal - promoDiscountAmount) + deliveryCostAmount;
 
                     let totalAdvanceRequired = 0;
                     if (advanceConfig && advanceConfig.requireAdvance) {
@@ -4833,10 +4955,59 @@ export default function CustomerStore({
 
                     return (
                       <div className="border-t pt-4 space-y-3 bg-white">
+                        {/* Promo Code Apply Section */}
+                        <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 mt-2 mb-4 space-y-2 text-xs">
+                          <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide block">
+                            {lang === 'en' ? 'Have a Promo Code?' : 'প্রোমো কোড আছে কি?'}
+                          </label>
+                          {appliedPromo ? (
+                            <div className="flex items-center justify-between bg-emerald-50 border border-emerald-250 p-2.5 rounded-lg text-xs leading-none animate-fade-in">
+                              <span className="font-extrabold text-emerald-800 flex items-center gap-1.5 font-mono">
+                                <Tag className="w-3.5 h-3.5 text-emerald-600" />
+                                {appliedPromo.code} {lang === 'en' ? 'Applied' : 'প্রযুক্ত হয়েছে'} (-৳{promoDiscountAmount})
+                              </span>
+                              <button
+                                type="button"
+                                onClick={handleRemovePromoCode}
+                                className="text-red-500 hover:text-red-700 font-extrabold focus:outline-none p-1 cursor-pointer"
+                                title={lang === 'en' ? "Remove Code" : "কোড সরান"}
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-1.5">
+                              <input
+                                type="text"
+                                value={promoCodeInput}
+                                onChange={(e) => setPromoCodeInput(e.target.value)}
+                                placeholder={lang === 'en' ? "e.g. FLASH100" : "যেমন: FLASH100"}
+                                className="flex-1 bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold uppercase placeholder-slate-400 focus:outline-none focus:border-pink-400 focus:ring-1 focus:ring-pink-400"
+                              />
+                              <button
+                                type="button"
+                                onClick={handleApplyPromoCode}
+                                className="bg-pink-600 hover:bg-pink-700 text-white font-extrabold px-3 py-1.5 rounded-lg text-xs uppercase tracking-wider cursor-pointer transition-colors"
+                              >
+                                {lang === 'en' ? 'Apply' : 'প্রয়োগ'}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+
                         <div className="flex justify-between items-baseline">
                           <span className="text-xs text-slate-500 font-bold">Subtotal</span>
                           <span className="text-[15px] font-bold text-slate-600">৳{cartSubtotal}</span>
                         </div>
+                        {appliedPromo && (
+                          <div className="flex justify-between items-center text-[11px] text-emerald-600 border-b pb-2 animate-fade-in font-semibold">
+                            <span className="flex items-center gap-1">
+                              <Tag className="w-3.5 h-3.5 shrink-0" />
+                              Promo Code Discount ({appliedPromo.code})
+                            </span>
+                            <span className="font-mono font-extrabold text-emerald-700">-৳{promoDiscountAmount}</span>
+                          </div>
+                        )}
                         <div className="flex justify-between text-[11px] text-slate-500 border-b pb-2 font-semibold">
                           <span>Delivery Charge ({matchedDistrict ? matchedDistrict.district : 'Not selected'})</span>
                           <span className="text-indigo-600 font-extrabold">৳{deliveryCostAmount}</span>
@@ -4994,7 +5165,7 @@ export default function CustomerStore({
                 <div className="bg-pink-50/50 p-4 border border-pink-100 rounded-2xl">
                   <p className="text-xs font-bold text-pink-950">Assalamu Alaikum 🙏</p>
                   <p className="text-xs text-pink-600 mt-1 leading-relaxed">
-                    Welcome to <b>ORIVIAN</b>. How can we assist you with your orders or delivery today?
+                    Welcome to <b>DEALY</b>. How can we assist you with your orders or delivery today?
                   </p>
                 </div>
                 <a 
