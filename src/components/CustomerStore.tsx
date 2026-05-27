@@ -4,7 +4,7 @@ import {
   ShoppingCart, Search, LogIn, LogOut, ArrowRight, ArrowLeft, UserCheck, 
   MapPin, Phone, User, Package, Check, ChevronLeft, ChevronRight, Star,
   Smartphone, Building, Mail, Clock, HelpCircle, Eye, Tag, AlertCircle, ShoppingBag, Truck, X, ShieldCheck, Menu,
-  Heart, MessageSquare, Home, Camera, Save, Edit3, Upload, Trash, Plus, Award, Layers, DollarSign, Lock, Shield, Loader2, CreditCard, CheckCircle2, MoreVertical
+  Heart, MessageSquare, Home, Camera, Save, Edit3, Upload, Trash, Plus, Award, Layers, DollarSign, Lock, Shield, Loader2, CreditCard, CheckCircle2, MoreVertical, Info, Calendar
 } from 'lucide-react';
 import { Product, Category, Order, OrderStatus, Banner, SellerApp, Customer, SpecialOffer, DeliveryCharge, FooterConfig, PopupImage, ResellerPageConfig, ResellerSubscriptionOption, ResellerFAQ, ResellerBenefitCard, AdvanceConfig, PromoCode } from '../types';
 import OrderTracker from './OrderTracker';
@@ -526,6 +526,7 @@ export default function CustomerStore({
   const [showCustProfilePage, setShowCustProfilePage] = useState(false);
   const [showCartPage, setShowCartPage] = useState(false);
   const [showSupportPage, setShowSupportPage] = useState(false);
+  const [showMyOrdersPage, setShowMyOrdersPage] = useState(false);
   const [isCheckingOut, setIsCheckingOut] = useState(false);
   const [orderIdToCancel, setOrderIdToCancel] = useState<string | null>(null);
   const [orderIdToDeliver, setOrderIdToDeliver] = useState<string | null>(null);
@@ -534,6 +535,9 @@ export default function CustomerStore({
   const [checkoutDistrictId, setCheckoutDistrictId] = useState<string>('');
   const [selectedCartIds, setSelectedCartIds] = useState<string[]>([]);
   const [clickedPayToConfirm, setClickedPayToConfirm] = useState(false);
+  const [isAdvanceLoading, setIsAdvanceLoading] = useState(false);
+  const [showAdvancePaymentView, setShowAdvancePaymentView] = useState(false);
+  const avatarInputRef = React.useRef<HTMLInputElement>(null);
 
   // Promo code customer states
   const [promoCodeInput, setPromoCodeInput] = useState('');
@@ -615,6 +619,16 @@ export default function CustomerStore({
       setShowPopupModal(true);
     }
   }, []);
+
+  const [sidebarPopupIdx, setSidebarPopupIdx] = useState(0);
+
+  useEffect(() => {
+    if (activePopups.length <= 1) return;
+    const interval = setInterval(() => {
+      setSidebarPopupIdx(prev => (prev + 1) % activePopups.length);
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [activePopups.length]);
 
   // Submit search query and show all matched products in store list
   const handleSearchSubmit = () => {
@@ -730,6 +744,16 @@ export default function CustomerStore({
     }
   }, [deliveryCharges, checkoutDistrictId]);
 
+  useEffect(() => {
+    if (clickedPayToConfirm) {
+      setIsAdvanceLoading(true);
+      const timer = setTimeout(() => {
+        setIsAdvanceLoading(false);
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [clickedPayToConfirm]);
+
   const categoriesScrollRef = React.useRef<HTMLDivElement>(null);
 
   const scrollCategories = (scrollOffset: number) => {
@@ -754,6 +778,7 @@ export default function CustomerStore({
     setShowStatement(false);
     setIsCheckingOut(false);
     setShowResellerLandingPage(false);
+    setShowMyOrdersPage(false);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -766,6 +791,7 @@ export default function CustomerStore({
   const [guestDetails, setGuestDetails] = useState({ name: '', phone: '', address: '' });
   const [checkoutPaymentMethod, setCheckoutPaymentMethod] = useState<'COD' | 'bKash' | 'Nagad' | 'Rocket' | 'Bank'>('COD');
   const [checkoutTxId, setCheckoutTxId] = useState('');
+  const [checkoutSenderNo, setCheckoutSenderNo] = useState('');
   const [useProfileInfo, setUseProfileInfo] = useState(true);
 
   // Derived checkout inputs
@@ -798,6 +824,17 @@ export default function CustomerStore({
     }, 3000); // 3 seconds stay
     return () => clearInterval(interval);
   }, [activeBanners.length]);
+
+  // Prevent mobile users from encountering constrained checkout popup modals
+  useEffect(() => {
+    if (showCartModal && window.innerWidth < 768) {
+      setShowCartModal(false);
+      setViewingProduct(null);
+      setShowCartPage(true);
+      setIsCheckingOut(true);
+    }
+  }, [showCartModal]);
+
   const searchLower = searchInput.toLowerCase().trim();
   const displayProducts = products.filter((p) => {
     const matchesInStock = p.inStock;
@@ -967,7 +1004,12 @@ export default function CustomerStore({
   // Form Submissions
   const handleLoginSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (onCustLogin(loginData.phone, loginData.pass)) {
+    const phoneClean = loginData.phone.trim();
+    if (phoneClean.length !== 11) {
+      showNotif("মোবাইল নাম্বার অবশ্যই ১১ ডিজিটের হতে হবে (Mobile number must be exactly 11 digits).", "error");
+      return;
+    }
+    if (onCustLogin(phoneClean, loginData.pass)) {
       setShowAuthModal(false);
       setLoginData({ phone: '', pass: '' });
       setShowCustProfilePage(true);
@@ -976,7 +1018,16 @@ export default function CustomerStore({
 
   const handleRegisterSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (onCustRegister(regData)) {
+    if (!regData.name.trim() || !regData.phone.trim() || !regData.pass.trim()) {
+      showNotif("সবগুলো ঘর সঠিকভাবে পূরণ করুন (Please fill all fields).", "error");
+      return;
+    }
+    const phoneClean = regData.phone.trim();
+    if (phoneClean.length !== 11) {
+      showNotif("মোবাইল নাম্বার অবশ্যই ১১ ডিজিটের হতে হবে (Mobile number must be exactly 11 digits).", "error");
+      return;
+    }
+    if (onCustRegister({ ...regData, phone: phoneClean })) {
       setShowAuthModal(false);
       setRegData({ name: '', phone: '', address: '', pass: '' });
       setShowCustProfilePage(true);
@@ -1023,7 +1074,13 @@ export default function CustomerStore({
     const matchedProduct = products.find(p => p.name === ord.productName);
     if (matchedProduct) {
       addToCart(matchedProduct, ord.qty || 1, ord.color || '');
-      setShowCartModal(true);
+      if (window.innerWidth < 768) {
+        setViewingProduct(null);
+        setShowCartPage(true);
+        setIsCheckingOut(true);
+      } else {
+        setShowCartModal(true);
+      }
       showNotif(`Added "${ord.productName}" to cart. Ready to checkout!`, "success");
     } else {
       const partialProduct = products.find(p => 
@@ -1032,7 +1089,13 @@ export default function CustomerStore({
       );
       if (partialProduct) {
         addToCart(partialProduct, ord.qty || 1, ord.color || '');
-        setShowCartModal(true);
+        if (window.innerWidth < 768) {
+          setViewingProduct(null);
+          setShowCartPage(true);
+          setIsCheckingOut(true);
+        } else {
+          setShowCartModal(true);
+        }
         showNotif(`Added similar item: "${partialProduct.name}" to cart.`, "success");
       } else {
         showNotif(`Sorry, this exact product "${ord.productName}" is currently unavailable.`, "error");
@@ -1104,6 +1167,111 @@ export default function CustomerStore({
     setSelectedColor(prod.colors?.[0] || '');
     setQty(1);
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const renderSidebarContent = () => {
+    return (
+      <div className="hidden lg:block lg:col-span-1 space-y-6 sticky top-[88px] self-start">
+        <div className="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-md">
+          <div className="bg-pink-500 text-white px-5 py-4 font-black text-sm uppercase tracking-wider flex items-center gap-2">
+            <span className="p-1.5 bg-white/10 rounded-lg">
+              <Menu className="w-4 h-4 text-white" />
+            </span>
+            <span>All Categories</span>
+          </div>
+          <ul className="divide-y divide-slate-100 text-xs font-bold text-slate-700">
+            <li 
+              onClick={() => { 
+                setShowShopPage(true); 
+                setSelectedCat(null); 
+                setSelectedOffer(null); 
+                setViewingProduct(null); 
+                setShowCustProfilePage(false);
+                setShowCartPage(false);
+                setShowSupportPage(false);
+                setShowResellerLandingPage(false);
+                window.scrollTo({ top: 0, behavior: "smooth" });
+              }}
+              className={`px-5 py-3.5 cursor-pointer transition-all flex items-center justify-between hover:bg-emerald-50/60 hover:text-emerald-600 ${showShopPage ? 'bg-emerald-50 text-emerald-600 font-extrabold border-l-4 border-emerald-500' : ''}`}
+            >
+              <span className="flex items-center gap-1.5 font-extrabold">
+                <ShoppingBag className="w-4 h-4 text-emerald-540 text-emerald-500" />
+                <span>Shop (All Products)</span>
+              </span>
+              <span className="bg-emerald-555 bg-emerald-500 text-white font-black text-[9px] px-2 py-0.5 rounded-full z-10 shadow-sm leading-none">
+                NEW
+              </span>
+            </li>
+            {categories.map(c => (
+              <li 
+                key={c.id}
+                onClick={() => { 
+                  setSelectedCat(c.id); 
+                  setSelectedOffer(null); 
+                  setViewingProduct(null); 
+                  setShowResellerLandingPage(false);
+                  setShowShopPage(false);
+                  setShowOnlyFavorites(false);
+                  setShowCustProfilePage(false);
+                  setShowCartPage(false);
+                  setShowSupportPage(false);
+                }}
+                className={`px-5 py-3.5 cursor-pointer transition-all flex items-center justify-between hover:bg-pink-50/40 hover:text-pink-600 ${(selectedCat === c.id && !selectedOffer) ? 'bg-pink-50/50 text-pink-600 font-extrabold border-l-4 border-pink-500' : ''}`}
+              >
+                <span className="truncate">{c.name}</span>
+                <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        {/* Sidebar Popup Promotion Widget */}
+        {!showPopupModal && activePopups.length > 0 && (
+          <div className="bg-white rounded-2xl overflow-hidden border border-slate-150/80 shadow-2xs p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-black uppercase text-pink-600 tracking-wider">Special Offer 🔥</span>
+              <span className="text-[10px] text-slate-400 font-mono font-bold">
+                {sidebarPopupIdx + 1}/{activePopups.length}
+              </span>
+            </div>
+            <div className="relative aspect-[3/4] rounded-xl overflow-hidden bg-slate-50 border border-slate-100 group">
+              {activePopups[sidebarPopupIdx].link ? (
+                <a 
+                  href={activePopups[sidebarPopupIdx].link}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block w-full h-full cursor-pointer"
+                >
+                  <img 
+                    src={activePopups[sidebarPopupIdx].img} 
+                    alt="Special Promo Banner" 
+                    className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                    referrerPolicy="no-referrer"
+                  />
+                </a>
+              ) : (
+                <img 
+                  src={activePopups[sidebarPopupIdx].img} 
+                  alt="Special Promo Banner" 
+                  className="w-full h-full object-cover"
+                  referrerPolicy="no-referrer"
+                />
+              )}
+            </div>
+            {activePopups[sidebarPopupIdx].link && (
+              <a 
+                href={activePopups[sidebarPopupIdx].link}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full bg-pink-500 hover:bg-pink-600 text-white font-black text-[11px] py-1.5 rounded-xl uppercase transition-all flex items-center justify-center gap-1 cursor-pointer shadow-xs leading-none"
+              >
+                GET OFFER <ArrowRight className="w-3 h-3" />
+              </a>
+            )}
+          </div>
+        )}
+      </div>
+    );
   };
 
   return (
@@ -1220,7 +1388,7 @@ export default function CustomerStore({
                 className="mt-4 flex flex-col items-center gap-1 group cursor-pointer transition-all focus:outline-none"
                 title="Dismiss promotion"
               >
-                <div className="bg-slate-900/90 text-white hover:bg-pink-600 p-2.5 rounded-full border border-slate-750 hover:border-pink-500 shadow-lg active:scale-95 transition-all">
+                <div className="bg-slate-900/90 text-white hover:bg-pink-600 p-2.5 rounded-full border border-slate-700 hover:border-pink-500 shadow-lg active:scale-95 transition-all">
                   <X className="w-4 h-4" />
                 </div>
                 <span className="text-[10px] font-black text-white/70 uppercase tracking-widest leading-none mt-1 select-none group-hover:text-pink-400 transition-colors">Close</span>
@@ -1231,15 +1399,13 @@ export default function CustomerStore({
       </AnimatePresence>
 
       {/* HEADER NAVBAR */}
-      <header className="sticky top-0 z-40 bg-white border-b border-slate-200/80 shadow-xs text-slate-900 select-none">
-        {/* Bangladesh Hot Pink top highlight border mimicking brand quality */}
-        <div className="h-1 bg-pink-500 w-full" />
+      <header className="sticky top-0 z-50 bg-pink-600 shadow-md text-white select-none">
         
         <div className="max-w-7xl mx-auto px-4 h-14 md:h-18 flex items-center justify-between gap-3">
           
           {/* ----------------- MOBILE DYNAMIC HEADER (md:hidden) ----------------- */}
           <div className="flex md:hidden items-center justify-between w-full h-full gap-2">
-            { (viewingProduct || showCartPage || showSupportPage || showCustProfilePage || showShopPage || showOnlyFavorites) ? (
+            { (viewingProduct || showCartPage || showSupportPage || showCustProfilePage || showShopPage || showOnlyFavorites || showMyOrdersPage) ? (
               /* SUB-PAGE COMPACT HEADER (With ArrowLeft back button and small title) */
               <div className="flex items-center justify-between w-full">
                 {showCustProfilePage ? (
@@ -1247,11 +1413,11 @@ export default function CustomerStore({
                     <div className="flex items-center gap-1">
                       <button 
                         onClick={goHome}
-                        className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-800 cursor-pointer active:scale-95 transition-transform flex-shrink-0"
+                        className="p-1.5 hover:bg-pink-700 rounded-lg text-white cursor-pointer active:scale-95 transition-transform flex-shrink-0"
                       >
-                        <ArrowLeft className="w-5 h-5 text-slate-800 font-extrabold" />
+                        <ArrowLeft className="w-5 h-5 text-white font-extrabold" />
                       </button>
-                      <span className="font-extrabold text-sm text-slate-900 tracking-tight select-none uppercase truncate max-w-[150px]">
+                      <span className="font-extrabold text-sm text-white tracking-tight select-none uppercase truncate max-w-[150px]">
                         {t("My Account")}
                       </span>
                     </div>
@@ -1263,10 +1429,10 @@ export default function CustomerStore({
                           setShowCustProfilePage(false);
                           showNotif("Successfully logged out.", "success");
                         }}
-                        className="p-1.5 hover:bg-rose-50 text-rose-500 rounded-lg cursor-pointer active:scale-95 transition-all flex-shrink-0"
+                        className="p-1.5 hover:bg-pink-700/50 text-white rounded-lg cursor-pointer active:scale-95 transition-all flex-shrink-0"
                         title="Logout Account"
                       >
-                        <LogOut className="w-5 h-5" />
+                        <LogOut className="w-5 h-5 text-white" />
                       </button>
                     </div>
                   </>
@@ -1275,20 +1441,26 @@ export default function CustomerStore({
                     <button 
                       onClick={() => {
                         if (viewingProduct) setViewingProduct(null);
-                        else {
+                        else if (showCartPage && isCheckingOut) {
+                          setIsCheckingOut(false);
+                        } else if (showMyOrdersPage) {
+                          setShowMyOrdersPage(false);
+                          setShowCustProfilePage(true); // Return to customer account details
+                        } else {
                           goHome();
                         }
                       }}
-                      className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-800 cursor-pointer active:scale-90 transition-transform flex-shrink-0"
+                      className="p-1.5 hover:bg-pink-700 rounded-lg text-white cursor-pointer active:scale-90 transition-transform flex-shrink-0"
                     >
-                      <ArrowLeft className="w-5 h-5 text-slate-800 font-extrabold" />
+                      <ArrowLeft className="w-5 h-5 text-white font-extrabold" />
                     </button>
-                    <span className="font-extrabold text-sm text-slate-900 tracking-tight select-none uppercase truncate text-center max-w-[180px]">
+                    <span className="font-extrabold text-sm text-white tracking-tight select-none uppercase truncate text-center max-w-[180px]">
                       {viewingProduct ? viewingProduct.name :
-                       showCartPage ? t("My Cart") :
+                       showCartPage ? (isCheckingOut ? (lang === 'en' ? "Checkout" : "চেকআউট") : t("My Cart")) :
                        showShopPage ? t("Shop") :
                        showSupportPage ? t("Help & Support") :
                        showOnlyFavorites ? t("Saved Items") :
+                       showMyOrdersPage ? (lang === 'en' ? "My Orders" : "আমার অর্ডার") :
                        showCustProfilePage ? t("My Account") : "Dealy"}
                     </span>
                     <div className="flex-shrink-0 w-8 flex justify-end">
@@ -1300,7 +1472,7 @@ export default function CustomerStore({
                               showNotif("Cart cleared!", "success");
                             }
                           }}
-                          className="p-1.5 hover:bg-red-50 text-slate-500 hover:text-red-500 rounded-lg cursor-pointer transition-colors"
+                          className="p-1.5 hover:bg-pink-700 text-pink-100 hover:text-white rounded-lg cursor-pointer transition-colors"
                           title="Clear Cart"
                         >
                           <Trash className="w-4.5 h-4.5" />
@@ -1314,7 +1486,7 @@ export default function CustomerStore({
                               showNotif("Favorites cleared!", "success");
                             }
                           }}
-                          className="p-1.5 hover:bg-red-50 text-slate-500 hover:text-red-500 rounded-lg cursor-pointer transition-colors"
+                          className="p-1.5 hover:bg-pink-700 text-pink-100 hover:text-white rounded-lg cursor-pointer transition-colors"
                           title="Clear Favorites"
                         >
                           <Trash className="w-4.5 h-4.5" />
@@ -1331,15 +1503,15 @@ export default function CustomerStore({
                 <button 
                   type="button"
                   onClick={() => setShowMobileMenu(true)}
-                  className="flex-shrink-0 p-1 bg-slate-50 hover:bg-slate-100 border border-slate-200/50 rounded-lg text-slate-600 cursor-pointer active:scale-95 transition-all w-[34px] h-[34px] flex items-center justify-center shadow-3xs"
+                  className="flex-shrink-0 p-1 bg-pink-700 hover:bg-pink-800 border border-pink-550/30 rounded-lg text-white cursor-pointer active:scale-95 transition-all w-[34px] h-[34px] flex items-center justify-center shadow-3xs"
                   title="Menu / ক্যাটাগরি ও প্রোফাইল"
                 >
-                  <MoreVertical className="w-5 h-5 text-pink-500 font-extrabold shrink-0" />
+                  <MoreVertical className="w-5 h-5 text-white font-extrabold shrink-0" />
                 </button>
 
                 <div 
                   onClick={goHome}
-                  className="flex-shrink-0 font-black text-xs xs:text-[13px] tracking-tighter text-pink-500 cursor-pointer uppercase font-display leading-none ml-0.5"
+                  className="flex-shrink-0 font-black text-base xs:text-lg sm:text-xl tracking-[0.05em] text-white cursor-pointer uppercase font-display leading-none ml-1.5 shadow-sm"
                 >
                   DEALY
                 </div>
@@ -1348,7 +1520,7 @@ export default function CustomerStore({
                 <div className="flex-1 min-w-[70px] relative flex items-center h-[34px]">
                   <input 
                     type="text" 
-                    placeholder="Search..." 
+                    placeholder={lang === 'en' ? "Search product" : "পণ্য খুঁজুন"}
                     value={searchInput}
                     onChange={(e) => {
                       const val = e.target.value;
@@ -1367,9 +1539,9 @@ export default function CustomerStore({
                         handleSearchSubmit();
                       }
                     }}
-                    className="w-full h-full bg-slate-100/75 hover:bg-slate-100/95 focus:bg-white text-slate-900 rounded-l-lg pl-2 pr-6 py-1.5 text-[11px] focus:outline-none transition-all placeholder-slate-400 border-2 border-r-0 border-slate-200 focus:border-pink-500 font-semibold"
+                    className="w-full h-full bg-white text-slate-900 rounded-lg pl-3 pr-10 py-1.5 text-[11px] focus:outline-none transition-all placeholder-slate-400 border border-transparent font-semibold shadow-inner"
                   />
-                  {searchInput && (
+                  {searchInput ? (
                     <button 
                       onClick={() => {
                         setSearchInput('');
@@ -1381,21 +1553,21 @@ export default function CustomerStore({
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>
-                  )}
+                  ) : null}
                   <button 
                     onClick={handleSearchSubmit}
-                    className="bg-pink-500 hover:bg-pink-600 text-white px-2 rounded-r-lg flex items-center justify-center border-l-0 border-2 border-pink-500 hover:border-pink-600 cursor-pointer active:scale-95 transition-all h-full shrink-0"
+                    className="absolute right-2.5 text-slate-400 hover:text-pink-600 active:scale-90 transition-transform cursor-pointer"
                   >
-                    <Search className="w-4 h-4 text-white font-extrabold" />
+                    <Search className="w-4 h-4 font-black" />
                   </button>
                 </div>
 
                 {/* Clean, attractive Reseller button right of search bar with brand pink color theme - styled to perfectly match heights */}
                 <button 
                   onClick={openResellerLandingPage}
-                  className="flex-shrink-0 bg-pink-50 hover:bg-pink-100 border border-pink-250 text-pink-650 font-black text-[9px] sm:text-[10px] uppercase tracking-wider px-2 py-1 rounded-lg flex items-center gap-1 cursor-pointer active:scale-95 transition-all h-[34px] shadow-2xs"
+                  className="flex-shrink-0 bg-white/10 hover:bg-white/20 border border-white/20 text-white font-black text-[9px] sm:text-[10px] uppercase tracking-wider px-2 py-1 rounded-lg flex items-center gap-1 cursor-pointer active:scale-95 transition-all h-[34px] shadow-2xs"
                 >
-                  <UserCheck className="w-3.5 h-3.5 text-pink-500 shrink-0" />
+                  <UserCheck className="w-3.5 h-3.5 text-white shrink-0" />
                   <span className="leading-none uppercase hidden xs:inline">{t("Join Reseller")}</span>
                 </button>
 
@@ -1403,12 +1575,12 @@ export default function CustomerStore({
                 <button 
                   type="button"
                   onClick={() => setLang(lang === 'en' ? 'bn' : 'en')}
-                  className="flex-shrink-0 bg-slate-50 hover:bg-slate-100 border border-slate-250 text-slate-705 font-extrabold text-[9px] sm:text-[10px] px-1.5 py-1 rounded-lg flex items-center gap-0.5 cursor-pointer active:scale-95 transition-all h-[34px] shadow-3xs"
+                  className="flex-shrink-0 bg-white/10 hover:bg-white/20 border border-white/20 text-white font-extrabold text-[9px] sm:text-[10px] px-1.5 py-1 rounded-lg flex items-center gap-0.5 cursor-pointer active:scale-95 transition-all h-[34px] shadow-3xs"
                   title="Switch Language / ভাষা পরিবর্তন করুন"
                 >
-                  <span className={lang === 'en' ? 'text-pink-600 font-black' : 'text-slate-400 font-bold'}>EN</span>
-                  <span className="text-slate-350">|</span>
-                  <span className={lang === 'bn' ? 'text-pink-600 font-black' : 'text-slate-400 font-bold'}>বাং</span>
+                  <span className={lang === 'en' ? 'text-white font-black underline decoration-2 underline-offset-2' : 'text-pink-100 font-bold'}>EN</span>
+                  <span className="text-white/20">|</span>
+                  <span className={lang === 'bn' ? 'text-white font-black underline decoration-2 underline-offset-2' : 'text-pink-100 font-bold'}>বাং</span>
                 </button>
               </div>
             )}
@@ -1416,11 +1588,12 @@ export default function CustomerStore({
 
           {/* ----------------- DESKTOP STANDARD HEADER (md:flex) ----------------- */}
           <div className="hidden md:flex items-center justify-between w-full h-full gap-4">
-            {/* Brand visual logo */}
-            <div className="flex items-center gap-3 flex-shrink-0">
+            
+            {/* 1. Website Logo & Brand Name */}
+            <div className="flex items-center gap-2.5 flex-shrink-0">
               <div 
                 onClick={goHome}
-                className="w-8 h-8 rounded-full overflow-hidden border border-slate-200 bg-teal-100 cursor-pointer hover:opacity-95 flex-shrink-0 shadow-sm"
+                className="w-10 h-10 rounded-full overflow-hidden border-2 border-white bg-white cursor-pointer hover:scale-105 transition-transform flex-shrink-0 shadow-sm"
               >
                 <img 
                   src={footerConfig.brandLogoUrl || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&q=80"} 
@@ -1431,20 +1604,19 @@ export default function CustomerStore({
               </div>
               <div 
                 onClick={goHome}
-                className="cursor-pointer flex flex-col justify-center select-none ml-2"
+                className="cursor-pointer flex flex-col justify-center select-none ml-2.5 flex-shrink-0"
               >
-                <h1 className="font-black text-lg tracking-tight text-pink-500 font-display leading-none uppercase">
+                <h1 className="font-black text-xl md:text-2xl lg:text-3xl tracking-[0.05em] text-white cursor-pointer uppercase font-display leading-none shadow-sm">
                   DEALY
                 </h1>
-                <span className="text-[9px] font-black text-slate-400 tracking-wider">PREMIUM HUB</span>
               </div>
             </div>
 
-            {/* Search input bar on desktop */}
-            <div className="flex-1 max-w-md relative flex items-center">
+            {/* 2. Search input bar on desktop */}
+            <div className="flex-1 max-w-sm xl:max-w-md relative flex items-center h-[38px] shrink-0">
               <input 
                 type="text" 
-                placeholder="Search product..." 
+                placeholder={lang === 'en' ? "Search product" : "পণ্য খুঁজুন"}
                 value={searchInput}
                 onChange={(e) => {
                   const val = e.target.value;
@@ -1463,31 +1635,97 @@ export default function CustomerStore({
                     handleSearchSubmit();
                   }
                 }}
-                className="w-full bg-slate-100/70 hover:bg-slate-100/90 focus:bg-white text-slate-900 rounded-l-xl pl-4 pr-10 py-2 text-xs focus:outline-none transition-all placeholder-slate-450 border-2 border-r-0 border-slate-200 focus:border-pink-500 font-bold"
+                className="w-full h-full bg-white text-slate-900 rounded-xl pl-4 pr-12 py-2 text-xs focus:outline-none transition-all placeholder-slate-400 border border-transparent font-bold shadow-inner"
               />
-              {searchInput && (
+              {searchInput ? (
                 <button 
                   onClick={() => {
                     setSearchInput('');
                     setViewingProduct(null);
                     setShowShopPage(false);
                   }}
-                  className="absolute right-[54px] text-slate-400 hover:text-slate-600 p-1 cursor-pointer transition-colors"
+                  className="absolute right-9 text-slate-400 hover:text-slate-605 p-1 cursor-pointer transition-colors"
                   title="Clear Search"
                 >
                   <X className="w-4 h-4" />
                 </button>
-              )}
+              ) : null}
               <button 
                 onClick={handleSearchSubmit}
-                className="bg-pink-500 hover:bg-pink-600 text-white px-5 py-2.5 rounded-r-xl flex items-center justify-center border-l-0 border-2 border-pink-500 hover:border-pink-600 cursor-pointer active:scale-95 transition-all h-[36px]"
+                className="absolute right-3.5 text-slate-450 hover:text-pink-600 active:scale-95 transition-all cursor-pointer"
               >
-                <Search className="w-4 h-4 text-white font-black" />
+                <Search className="w-4.5 h-4.5 text-slate-400 hover:text-pink-600 font-extrabold" />
               </button>
             </div>
 
-            {/* Dynamic Nav Control Rig on desktop */}
-            <div className="flex items-center gap-3 text-xs font-semibold">
+            {/* Nav control buttons container */}
+            <div className="flex items-center gap-2 text-xs font-bold shrink-0">
+              
+              {/* 3. Shop option */}
+              <button 
+                onClick={() => {
+                  setShowShopPage(true); 
+                  setSelectedCat(null); 
+                  setSelectedOffer(null); 
+                  setViewingProduct(null); 
+                  setShowCustProfilePage(false);
+                  setShowCartPage(false);
+                  setShowSupportPage(false);
+                  setShowOnlyFavorites(false);
+                  setShowResellerLandingPage(false);
+                  window.scrollTo({ top: 0, behavior: "smooth" });
+                }}
+                className={`px-3.5 py-2 rounded-xl text-xs font-black uppercase transition-all tracking-wide cursor-pointer active:scale-95 h-[38px] flex items-center gap-1.5 ${showShopPage && !selectedCat && !selectedOffer && !showOnlyFavorites && !showCustProfilePage && !showCartPage && !showSupportPage ? 'bg-pink-700 text-white shadow-sm border border-pink-800' : 'bg-white/10 hover:bg-white/20 text-white border border-white/20'}`}
+              >
+                <ShoppingBag className="w-4 h-4 text-white" />
+                <span>{lang === 'en' ? "Shop" : "শপিং"}</span>
+              </button>
+
+              {/* 4. Join Reseller option */}
+              <button 
+                onClick={openResellerLandingPage}
+                className="bg-white hover:bg-pink-50 text-pink-600 font-black text-xs uppercase tracking-wide px-3.5 py-2 rounded-xl flex items-center gap-1.5 cursor-pointer active:scale-95 transition-all h-[38px] shadow-sm"
+              >
+                <UserCheck className="w-4 h-4 text-pink-500 shrink-0" />
+                <span>{lang === 'en' ? "Join Reseller" : "সেলার হন"}</span>
+              </button>
+
+              {/* Wishlist Favorites link */}
+              <button 
+                onClick={() => {
+                  setShowOnlyFavorites(true);
+                  setViewingProduct(null);
+                  setShowCustProfilePage(false);
+                  setShowCartPage(false);
+                  setShowSupportPage(false);
+                  setSelectedCat(null);
+                  setShowShopPage(false);
+                  window.scrollTo({ top: 0, behavior: "smooth" });
+                }}
+                className={`relative p-2.5 rounded-xl transition-colors cursor-pointer active:scale-95 h-[38px] flex items-center justify-center ${showOnlyFavorites ? 'bg-pink-700 text-white border border-pink-805' : 'bg-white/10 hover:bg-white/20 text-white border border-white/20'}`}
+                title="Favorites / প্রিয়তালিকা"
+              >
+                <Heart className={`w-4 h-4 ${showOnlyFavorites ? 'fill-white stroke-white' : 'text-white font-extrabold'}`} />
+                {favorites.length > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 bg-yellow-400 text-pink-900 border border-white font-mono font-black text-[9px] w-4.5 h-4.5 rounded-full flex items-center justify-center shadow-xs">
+                    {favorites.length}
+                  </span>
+                )}
+              </button>
+
+              {/* Language Switch Selector */}
+              <button 
+                type="button"
+                onClick={() => setLang(lang === 'en' ? 'bn' : 'en')}
+                className="bg-white/10 hover:bg-white/20 border border-white/20 text-white font-extrabold text-[11px] px-3 py-2 rounded-xl flex items-center gap-1 cursor-pointer active:scale-95 transition-all h-[38px] shadow-3xs"
+                title="Switch Language / ভাষা পরিবর্তন করুন"
+              >
+                <span className={lang === 'en' ? 'text-white font-black underline decoration-2 underline-offset-2' : 'text-pink-100 font-bold'}>EN</span>
+                <span className="text-white/20">|</span>
+                <span className={lang === 'bn' ? 'text-white font-black underline decoration-2 underline-offset-2' : 'text-pink-100 font-bold'}>বাং</span>
+              </button>
+
+              {/* 5. Cart Option */}
               <button 
                 onClick={() => {
                   setShowCartPage(true);
@@ -1498,30 +1736,19 @@ export default function CustomerStore({
                   setShowSupportPage(false);
                   window.scrollTo({ top: 0, behavior: "smooth" });
                 }}
-                className="relative p-2.5 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-xl border border-slate-250/20 transition-colors cursor-pointer"
-                title="My Shop Cart"
+                className={`relative px-4 py-2 rounded-xl text-xs font-black uppercase transition-colors cursor-pointer active:scale-95 h-[38px] flex items-center gap-1.5 ${showCartPage ? 'bg-pink-700 text-white border border-pink-805' : 'bg-white hover:bg-pink-50 text-pink-600 border border-white'}`}
+                title="My Cart"
               >
-                <ShoppingCart className="w-4.5 h-4.5 text-slate-800" />
+                <ShoppingCart className={`w-4 h-4 ${showCartPage ? 'text-white' : 'text-pink-600'}`} />
+                <span>{lang === 'en' ? 'Cart' : 'কার্ট'}</span>
                 {cartItemsCount > 0 && (
-                  <span className="absolute -top-1.5 -right-1.5 bg-pink-500 text-white font-extrabold text-[8px] w-4.5 h-4.5 rounded-full flex items-center justify-center shadow">
+                  <span className="bg-pink-605 text-white font-mono font-black text-[9px] w-4.5 h-4.5 rounded-full flex items-center justify-center shadow-xs bg-pink-600">
                     {cartItemsCount}
                   </span>
                 )}
               </button>
 
-              {/* Desktop Language Selector */}
-              <button 
-                type="button"
-                onClick={() => setLang(lang === 'en' ? 'bn' : 'en')}
-                className="bg-slate-50 hover:bg-slate-100 border border-slate-250 text-slate-700 font-extrabold text-[11px] px-3 py-2 rounded-xl flex items-center gap-1 cursor-pointer active:scale-95 transition-all h-[36px] shadow-3xs"
-                title="Switch Language / ভাষা পরিবর্তন করুন"
-              >
-                <span className={lang === 'en' ? 'text-pink-600 font-black' : 'text-slate-400 font-bold'}>EN</span>
-                <span className="text-slate-300">|</span>
-                <span className={lang === 'bn' ? 'text-pink-600 font-black font-sans' : 'text-slate-400 font-bold'}>বাং</span>
-              </button>
-
-              {/* User Login/Dashboard logic */}
+              {/* 6. Sign In or Profile option */}
               {loggedCustomer ? (
                 <div className="relative group">
                   <button 
@@ -1532,10 +1759,10 @@ export default function CustomerStore({
                       setShowOnlyFavorites(false);
                       window.scrollTo({ top: 0, behavior: "smooth" });
                     }}
-                    className="flex items-center gap-1.5 bg-pink-50 hover:bg-pink-100 text-pink-600 px-4 py-2 rounded-xl shadow-xs active:scale-95 transition-all cursor-pointer font-extrabold text-xs"
+                    className="flex items-center gap-1.5 bg-white hover:bg-pink-50 text-pink-600 px-4 py-2 rounded-xl shadow-xs active:scale-95 transition-all cursor-pointer font-extrabold text-xs h-[38px]"
                   >
-                    <User className="w-3.5 h-3.5" />
-                    <span className="max-w-[100px] truncate">{loggedCustomer.name.split(' ')[0]}</span>
+                    <User className="w-4 h-4 text-pink-500" />
+                    <span className="max-w-[85px] truncate">{loggedCustomer.name.split(' ')[0]}</span>
                     <span className="text-[9px] text-pink-400">▼</span>
                   </button>
                   
@@ -1547,16 +1774,21 @@ export default function CustomerStore({
                     </div>
                     <button 
                       onClick={() => {
-                        setShowCustProfilePage(true);
+                        setShowMyOrdersPage(true);
+                        setShowCustProfilePage(false);
                         setViewingProduct(null);
                         setSelectedCat(null);
                         setShowOnlyFavorites(false);
+                        setShowCartPage(false);
+                        setShowSupportPage(false);
+                        setShowShopPage(false);
+                        setShowResellerLandingPage(false);
                         window.scrollTo({ top: 0, behavior: "smooth" });
                       }} 
                       className="w-full text-left px-3 py-2 text-xs rounded-xl hover:bg-slate-50 font-bold flex items-center gap-2 cursor-pointer"
                     >
                       <Package className="w-3.5 h-3.5 text-pink-600" />
-                      My Order History
+                      {lang === 'en' ? 'My Order History' : 'আমার অর্ডারসমূহ'}
                     </button>
                     <button 
                       onClick={() => {
@@ -1579,10 +1811,10 @@ export default function CustomerStore({
               ) : (
                 <button 
                   onClick={() => { setAuthType('login'); setShowAuthModal(true); }}
-                  className="hidden sm:flex bg-pink-500 hover:bg-pink-600 text-white font-extrabold px-4 py-2 rounded-xl shadow transition-colors items-center gap-1 cursor-pointer text-xs"
+                  className="bg-white hover:bg-pink-50 text-pink-600 font-extrabold px-4.5 py-2 rounded-xl shadow transition-colors flex items-center gap-1.5 cursor-pointer text-xs h-[38px] active:scale-95"
                 >
-                  <LogIn className="w-3.5 h-3.5" />
-                  <span>Sign In</span>
+                  <LogIn className="w-4 h-4 text-pink-500" />
+                  <span>{lang === 'en' ? 'Sign In' : 'লগইন'}</span>
                 </button>
               )}
             </div>
@@ -1596,44 +1828,81 @@ export default function CustomerStore({
         <main className="flex-1 max-w-4xl mx-auto w-full px-0 sm:px-3 py-0 sm:py-8 animate-fade-in text-slate-800 pb-28 md:pb-12">
           
           <div className="space-y-6 sm:space-y-8 animate-fade-in">
-            {/* 1. TOP PROFILE INFORMATION CARD */}
-            <div className="bg-white rounded-none sm:rounded-[24px] border-0 sm:border sm:border-slate-100 shadow-none sm:shadow-xs p-4 sm:p-6 md:p-8 relative overflow-hidden">
+            {/* 1. TOP PROFILE INFORMATION CARD - BEAUTIFIED FOR DEALY */}
+            <div className="bg-white rounded-2xl sm:rounded-[24px] border border-slate-100 shadow-sm p-5 sm:p-8 relative overflow-hidden">
               <div className="absolute top-0 left-0 right-0 h-2 bg-gradient-to-r from-pink-500 via-indigo-500 to-amber-400" />
               
-              <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 pb-6 border-b border-slate-100">
-                <div className="flex items-center gap-4">
-                  <div className="relative group w-20 h-20 rounded-full overflow-hidden bg-gradient-to-tr from-pink-500 via-purple-500 to-indigo-500 p-1 shadow-md shadow-slate-200 flex-shrink-0">
+              <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 pb-6 border-b border-slate-100">
+                <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 text-center sm:text-left w-full sm:w-auto">
+                  
+                  {/* Standalone hidden file picker element */}
+                  <input 
+                    ref={avatarInputRef}
+                    type="file" 
+                    accept="image/*" 
+                    className="hidden" 
+                    onChange={handleAvatarFileUpload} 
+                  />
+
+                  {/* Interactive Avatar */}
+                  <div 
+                    onClick={() => {
+                      if (isEditingProfile) {
+                        avatarInputRef.current?.click();
+                      }
+                    }}
+                    className={`relative group w-24 h-24 rounded-full overflow-hidden bg-gradient-to-tr from-pink-500 via-purple-500 to-indigo-500 p-1 shadow-md flex-shrink-0 ${isEditingProfile ? 'cursor-pointer hover:brightness-95' : ''}`}
+                    title={isEditingProfile ? "Click to change picture / ছবি পরিবর্তনের জন্য ক্লিক করুন" : "Customer Avatar"}
+                  >
                     <img 
                       src={profileAvatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&h=100&fit=crop"} 
                       alt={loggedCustomer.name} 
-                      className="w-full h-full object-cover rounded-full bg-white" 
+                      className="w-full h-full object-cover rounded-full bg-white transition-all group-hover:scale-105" 
                       referrerPolicy="no-referrer"
                     />
                     {isEditingProfile && (
-                      <div className="absolute inset-0 bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                        <Camera className="w-5 h-5 text-white" />
+                      <div className="absolute inset-0 bg-black/50 flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Camera className="w-6 h-6 text-white mb-1 animate-bounce" />
+                        <span className="text-[9px] text-white font-extrabold uppercase">Upload</span>
                       </div>
                     )}
                   </div>
-                  <div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h3 className="text-xl font-extrabold text-slate-900 tracking-tight">{loggedCustomer.name}</h3>
-                      <span className="bg-indigo-50 text-indigo-700 px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wide uppercase border border-indigo-100">Verified Shopper</span>
+
+                  <div className="flex-1 mt-2 sm:mt-0">
+                    <div className="flex items-center justify-center sm:justify-start gap-2 flex-wrap">
+                      <h3 className="text-2xl font-black text-slate-900 tracking-tight">{loggedCustomer.name}</h3>
+                      <span className="bg-pink-50 text-pink-600 px-3 py-1 rounded-full text-[10px] font-black tracking-wide uppercase border border-pink-100/60 shadow-3xs">
+                        Dealy VIP Shopper
+                      </span>
                     </div>
-                    <p className="text-xs text-slate-400 font-mono font-semibold mt-1">Username Reference ID: @{loggedCustomer.phone}</p>
-                    <p className="text-[11.5px] text-slate-500 font-bold mt-0.5">Primary Link: {loggedCustomer.phone}</p>
+                    <p className="text-xs text-slate-500 font-bold mt-2 flex items-center justify-center sm:justify-start gap-1">
+                      <Phone className="w-3.5 h-3.5 text-pink-500" />
+                      <span>সচল মোবাইল: {loggedCustomer.phone}</span>
+                    </p>
+                    <p className="text-[10px] text-slate-400 font-mono mt-1">
+                      Shopper ID: #{loggedCustomer.id.replace('c_', '')} | @dealy_user
+                    </p>
                     
                     {!isEditingProfile && (
-                      <div className="flex items-center gap-2 mt-3 flex-wrap">
+                      <div className="flex items-center justify-center sm:justify-start gap-2.5 mt-4 flex-wrap">
                         <button 
                           onClick={() => {
                             setShowStatement(!showStatement);
-                            showNotif(showStatement ? "Billing statement hidden." : "Billing statement panel visible now!", "success");
+                            showNotif(
+                              lang === 'en' 
+                                ? (showStatement ? "Stats dashboard has been hidden." : "Stats dashboard is now active.") 
+                                : (showStatement ? "পরিসংখ্যান হাইড করা হয়েছে।" : "পরিসংখ্যান ড্যাশবোর্ড সচল করা হয়েছে।"), 
+                              "success"
+                            );
                           }}
-                          className={`px-3 py-1.5 border rounded-xl font-extrabold text-[10.5px] flex items-center justify-center gap-1.5 cursor-pointer transition-all ${showStatement ? 'bg-indigo-650 border-indigo-600 bg-indigo-600 text-white shadow-xs' : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700'}`}
+                          className={`px-3.5 py-2 border rounded-xl font-extrabold text-[11px] flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95 ${showStatement ? 'bg-indigo-600 border-indigo-600 text-white shadow-md shadow-indigo-100' : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700'}`}
                         >
-                          <UserCheck className="w-3.5 h-3.5" />
-                          <span>Statement Icon</span>
+                          <UserCheck className="w-4 h-4 text-pink-500 shrink-0" />
+                          <span>
+                            {showStatement 
+                              ? (lang === 'en' ? "Hide Stats" : "পরিসংখ্যান বন্ধ করুন") 
+                              : (lang === 'en' ? "My Statistics" : "আমার পরিসংখ্যান")}
+                          </span>
                         </button>
 
                         <button 
@@ -1644,10 +1913,10 @@ export default function CustomerStore({
                             setProfileAddress(loggedCustomer.address || '');
                             setProfileAvatar(loggedCustomer.avatarUrl || '');
                           }}
-                          className="px-3 py-1.5 bg-pink-55 border border-pink-200/50 hover:bg-pink-100 active:scale-95 text-pink-600 rounded-xl font-extrabold text-[10.5px] flex items-center gap-1.5 cursor-pointer transition-all justify-center"
+                          className="px-3.5 py-2 bg-pink-50 hover:bg-pink-100 border border-pink-200/50 hover:scale-105 text-pink-600 rounded-xl font-bold text-[11px] flex items-center gap-1.5 cursor-pointer transition-all active:scale-95 shadow-3xs"
                         >
-                          <Edit3 className="w-3.5 h-3.5" />
-                          <span>Edit</span>
+                          <Edit3 className="w-3.5 h-3.5 shrink-0" />
+                          <span>{lang === 'en' ? "Edit Profile" : "তথ্য সংশোধন করুন"}</span>
                         </button>
                       </div>
                     )}
@@ -1657,61 +1926,43 @@ export default function CustomerStore({
 
               {/* Editable Profile Details Form */}
               {isEditingProfile ? (
-                <div className="pt-6 space-y-4">
-                  <h4 className="text-sm font-bold text-slate-800 uppercase tracking-wide flex items-center gap-1.5 border-b pb-2 mb-2">
-                    <User className="w-4 h-4 text-pink-500" /> Enter New Profile Details
+                <div className="pt-6 space-y-5">
+                  <div className="bg-pink-50/40 p-4 rounded-xl border border-pink-100/50 text-[11.5px] text-pink-700 font-bold leading-normal">
+                    💡 {lang === 'en' ? (
+                      <span><b>Tip:</b> You can click directly on the circular profile picture above to upload a new picture from your device, and click "Save Details".</span>
+                    ) : (
+                      <span><b>টিপস:</b> আপনি সরাসরি উপরের গোল প্রোফাইল ছবির উপর ক্লিক করে খুব সহজে আপনার মোবাইল থেকে বা কম্পিউটার থেকে নতুন ছবি আপলোড করে "তথ্য সংরক্ষণ করুন" এ ক্লিক করতে পারেন।</span>
+                    )}
+                  </div>
+
+                  <h4 className="text-xs font-black text-slate-800 uppercase tracking-wide flex items-center gap-2 border-b pb-2.5">
+                    <User className="w-4 h-4 text-pink-500" /> {lang === 'en' ? "Change Profile Details" : "প্রোফাইলের তথ্য পরিবর্তন করুন"}
                   </h4>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs leading-normal">
                     <div className="form-group">
-                      <label className="text-[10px] text-slate-450 font-black uppercase tracking-wider block mb-1">Full Registered Contact Name</label>
+                      <label className="text-[10px] text-slate-500 font-black uppercase tracking-wider block mb-1">{lang === 'en' ? "Full Name" : "কাস্টমার সম্পূর্ণ নাম"}</label>
                       <input 
                         type="text" 
-                        className="w-full px-3 py-2.5 border rounded-xl font-bold bg-white focus:outline-none focus:border-indigo-500" 
+                        className="w-full px-3.5 py-3 border rounded-xl font-extrabold text-slate-800 bg-white focus:outline-none focus:border-pink-500 focus:ring-1 focus:ring-pink-100" 
                         value={profileName}
                         onChange={(e) => setProfileName(e.target.value)}
+                        placeholder={lang === 'en' ? "Enter your name" : "আপনার সম্পূর্ণ নাম টাইপ করুন"}
                       />
                     </div>
                     <div className="form-group">
-                      <label className="text-[10px] text-slate-450 font-black uppercase tracking-wider block mb-1">Registered Phone Number</label>
+                      <label className="text-[10px] text-slate-500 font-black uppercase tracking-wider block mb-1">{lang === 'en' ? "Mobile Phone Number" : "কাস্টমার মোবাইল নাম্বার"}</label>
                       <input 
                         type="text" 
-                        className="w-full px-3 py-2.5 border rounded-xl font-mono font-bold bg-white focus:outline-none focus:border-indigo-500" 
+                        className="w-full px-3.5 py-3 border rounded-xl font-mono font-extrabold text-slate-800 bg-white focus:outline-none focus:border-pink-500 focus:ring-1 focus:ring-pink-100" 
                         value={profilePhone}
                         onChange={(e) => setProfilePhone(e.target.value)}
+                        placeholder="e.g. 017XXXXXXXX"
                       />
                     </div>
+                    
                     <div className="form-group md:col-span-2">
-                      <label className="text-[10px] text-slate-450 font-black uppercase tracking-wider block mb-1">Upload Profile Avatar Picture</label>
-                      <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
-                        <label className="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-slate-200 hover:border-pink-400 hover:bg-pink-50/10 rounded-2xl p-4 cursor-pointer transition-all group">
-                          <Upload className="w-5 h-5 text-slate-400 group-hover:text-pink-500 mb-1.5 transition-colors" />
-                          <span className="text-[11px] font-black text-slate-700">Choose Image File</span>
-                          <span className="text-[9px] text-slate-400 font-bold mt-0.5">PNG, JPG up to 3MB</span>
-                          <input 
-                            type="file" 
-                            accept="image/*" 
-                            className="hidden" 
-                            onChange={handleAvatarFileUpload} 
-                          />
-                        </label>
-                        <div className="flex flex-col justify-center text-center px-2 text-[10px] font-bold text-slate-400">
-                          — OR —
-                        </div>
-                        <div className="flex-2 flex-1">
-                          <label className="text-[9px] text-slate-400 font-bold uppercase tracking-wider block mb-1">Paste Direct Image Address Link</label>
-                          <input 
-                            type="text" 
-                            className="w-full px-3 py-2.5 border rounded-xl font-mono text-[11px] text-slate-600 bg-white focus:outline-none focus:border-indigo-500" 
-                            placeholder="https://images.unsplash.com/photo-..."
-                            value={profileAvatar}
-                            onChange={(e) => setProfileAvatar(e.target.value)}
-                          />
-                        </div>
-                      </div>
-                    </div>
-                    <div className="form-group md:col-span-2">
-                      <label className="text-[10px] text-slate-450 font-black uppercase tracking-wider block mb-1">Select Preset Picture</label>
-                      <div className="flex flex-wrap gap-2 pt-1">
+                      <label className="text-[10px] text-slate-500 font-black uppercase tracking-wider block mb-1.5">{lang === 'en' ? "Or select any avatar preset below" : "অথবা নিচের যেকোনো একটি অ্যাভাটার সিলেক্ট করুন"}</label>
+                      <div className="flex flex-wrap gap-3 pt-1">
                         {[
                           'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&h=100&fit=crop',
                           'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop',
@@ -1720,10 +1971,10 @@ export default function CustomerStore({
                           'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=100&h=100&fit=crop'
                         ].map((url, idx) => (
                           <button 
-                            key={idx}
+                            key={url}
                             type="button"
                             onClick={() => setProfileAvatar(url)}
-                            className={`w-9 h-9 rounded-full border-2 overflow-hidden transition-all ${profileAvatar === url ? 'border-pink-550 border-pink-500 scale-110 shadow-md shadow-pink-500/15' : 'border-transparent hover:scale-105'}`}
+                            className={`w-11 h-11 rounded-full border-2 overflow-hidden transition-all relative ${profileAvatar === url ? 'border-pink-500 scale-110 shadow-md shadow-pink-500/20' : 'border-slate-150 hover:scale-105 hover:border-slate-300'}`}
                           >
                             <img src={url} alt={`Preset ${idx}`} className="w-full h-full object-cover rounded-full" referrerPolicy="no-referrer" />
                           </button>
@@ -1731,81 +1982,86 @@ export default function CustomerStore({
                       </div>
                     </div>
                     <div className="form-group md:col-span-2">
-                      <label className="text-[10px] text-slate-450 font-black uppercase tracking-wider block mb-1">Home Delivery Shipping Address</label>
+                      <label className="text-[10px] text-slate-500 font-black uppercase tracking-wider block mb-1">{lang === 'en' ? "Home Delivery Address" : "হোম ডেলিভারি ঠিকানা"}</label>
                       <textarea 
-                        rows={2}
-                        className="w-full px-3 py-2 border rounded-xl font-medium bg-white focus:outline-none focus:border-indigo-500 text-xs text-slate-700 leading-relaxed" 
+                        rows={2.5}
+                        className="w-full px-3.5 py-3 border rounded-xl font-extrabold text-slate-700 bg-white focus:outline-none focus:border-pink-500 focus:ring-1 focus:ring-pink-100 text-xs leading-relaxed" 
                         value={profileAddress}
                         onChange={(e) => setProfileAddress(e.target.value)}
-                        placeholder="Type house, flat, road name and regional details"
+                        placeholder={lang === 'en' ? "Enter your detailed city/district, area, road and holding address" : "আপনার বাসা নং, রোড নং, থানা, জেলা সহ বিস্তারিত ডেলিভারি ঠিকানা দিন"}
                       />
                     </div>
                   </div>
-                  <div className="flex gap-2.5 pt-3.5 max-w-sm">
+                  <div className="flex gap-3 pt-3.5 max-w-sm">
                     <button 
                       onClick={() => {
                         if (!profileName.trim() || !profilePhone.trim()) {
-                          showNotif("Name and Phone number are required.", "error");
+                          showNotif(lang === 'en' ? "Name and Phone number are required." : "নাম এবং মোবাইল নাম্বার প্রদান করুন।", "error");
+                          return;
+                        }
+                        const phoneClean = profilePhone.trim();
+                        if (phoneClean.length !== 11) {
+                          showNotif(lang === 'en' ? "Mobile number must be exactly 11 digits." : "মোবাইল নাম্বার অবশ্যই ১১ ডিজিটের হতে হবে।", "error");
                           return;
                         }
                         const updated: Customer = {
                           ...loggedCustomer,
                           name: profileName,
-                          phone: profilePhone,
+                          phone: phoneClean,
                           address: profileAddress,
                           avatarUrl: profileAvatar
                         };
                         onUpdateCustomer(updated);
                         setIsEditingProfile(false);
-                        showNotif("Profile and address fields updated!", "success");
+                        showNotif(lang === 'en' ? "Profile details updated successfully!" : "শপার প্রোফাইল সফলভাবে আপডেট করা হয়েছে!", "success");
                       }}
-                      className="flex-1 bg-pink-500 hover:bg-pink-600 text-white font-black py-2.5 rounded-xl cursor-pointer shadow-sm active:scale-95 transition-all flex items-center justify-center gap-1.5"
+                      className="flex-1 bg-pink-500 hover:bg-pink-600 text-white font-black py-3 rounded-xl cursor-pointer shadow-md active:scale-95 transition-all flex items-center justify-center gap-1.5"
                     >
-                      <Save className="w-4 h-4" /> Save Profile Details
+                      <Save className="w-4 h-4 shrink-0" /> {lang === 'en' ? "Save Details" : "তথ্য সংরক্ষণ করুন"}
                     </button>
                     <button 
                       onClick={() => setIsEditingProfile(false)}
-                      className="px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold py-2.5 rounded-xl cursor-pointer"
+                      className="px-5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold py-3 rounded-xl cursor-pointer transition-colors active:scale-95 text-xs text-[11px]"
                     >
-                      Cancel
+                      {lang === 'en' ? "Cancel" : "বাতিল"}
                     </button>
                   </div>
                 </div>
               ) : (
                 <div className="pt-6 grid grid-cols-1 md:grid-cols-12 gap-5">
-                  <div className={`${showStatement ? 'md:col-span-8' : 'md:col-span-12'} bg-slate-50/70 p-1 rounded-2xl border border-slate-200/65 text-xs`}>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-slate-200/80">
+                  <div className={`${showStatement ? 'md:col-span-8' : 'md:col-span-12'} bg-slate-50/50 p-1 rounded-2xl border border-slate-100 text-xs transition-all`}>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-slate-100">
                       {/* Name segment */}
-                      <div className="p-3.5 flex items-center gap-3">
-                        <div className="p-2 bg-pink-50 rounded-xl shrink-0">
-                          <User className="w-4 h-4 text-pink-500" />
+                      <div className="p-4 flex items-center gap-3">
+                        <div className="p-2.5 bg-pink-50 rounded-xl shrink-0">
+                          <User className="w-5 h-5 text-pink-500" />
                         </div>
                         <div className="min-w-0 flex-1">
-                          <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-wider block">Full Contact Name</span>
-                          <span className="font-extrabold text-slate-800 text-[12.5px] truncate block mt-0.5">{loggedCustomer.name}</span>
+                          <span className="text-[9.5px] text-slate-400 font-extrabold uppercase tracking-wider block">{lang === 'en' ? "Contact Name" : "পূর্ণ নাম"}</span>
+                          <span className="font-extrabold text-slate-800 text-[13.5px] truncate block mt-0.5">{loggedCustomer.name}</span>
                         </div>
                       </div>
 
                       {/* Phone segment */}
-                      <div className="p-3.5 flex items-center gap-3">
-                        <div className="p-2 bg-indigo-50 rounded-xl shrink-0">
-                          <Phone className="w-4 h-4 text-indigo-500" />
+                      <div className="p-4 flex items-center gap-3">
+                        <div className="p-2.5 bg-indigo-50 rounded-xl shrink-0">
+                          <Phone className="w-5 h-5 text-indigo-500" />
                         </div>
                         <div className="min-w-0 flex-1">
-                          <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-wider block">Phone Contact / ID</span>
-                          <span className="font-mono font-bold text-slate-800 text-[12.5px] truncate block mt-0.5">{loggedCustomer.phone}</span>
+                          <span className="text-[9.5px] text-slate-400 font-extrabold uppercase tracking-wider block">{lang === 'en' ? "Active Phone" : "মোবাইল নাম্বার"}</span>
+                          <span className="font-mono font-extrabold text-slate-800 text-[13.5px] truncate block mt-0.5">{loggedCustomer.phone}</span>
                         </div>
                       </div>
 
                       {/* Address segment */}
-                      <div className="p-3.5 flex items-start gap-3">
-                        <div className="p-2 bg-emerald-50 rounded-xl shrink-0 mt-0.5">
-                          <MapPin className="w-4 h-4 text-emerald-500" />
+                      <div className="p-4 flex items-start gap-3">
+                        <div className="p-2.5 bg-emerald-50 rounded-xl shrink-0 mt-0.5">
+                          <MapPin className="w-5 h-5 text-emerald-500" />
                         </div>
                         <div className="min-w-0 flex-1">
-                          <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-wider block">Shipping Address</span>
-                          <span className="text-slate-600 font-semibold text-xs leading-relaxed block mt-0.5 break-words line-clamp-2">
-                            {loggedCustomer.address || <span className="text-slate-400 italic font-medium">No address saved yet</span>}
+                          <span className="text-[9.5px] text-slate-400 font-extrabold uppercase tracking-wider block">{lang === 'en' ? "Delivery Address" : "ডেলিভারি ঠিকানা"}</span>
+                          <span className="text-slate-600 font-extrabold text-[12px] leading-relaxed block mt-0.5 break-words line-clamp-2">
+                            {loggedCustomer.address || <span className="text-slate-400 italic">{lang === 'en' ? "No saved delivery address" : "কোনো ঠিকানা সংরক্ষণ করা নেই"}</span>}
                           </span>
                         </div>
                       </div>
@@ -1816,29 +2072,33 @@ export default function CustomerStore({
                     <motion.div 
                       initial={{ opacity: 0, scale: 0.95 }}
                       animate={{ opacity: 1, scale: 1 }}
-                      className="md:col-span-4 bg-gradient-to-r from-indigo-50/20 to-pink-50/10 p-4 rounded-2xl border border-pink-100 flex flex-col justify-between"
+                      className="md:col-span-4 bg-gradient-to-r from-indigo-50/20 to-pink-50/10 p-5 rounded-2xl border border-pink-100/50 flex flex-col justify-between shadow-3xs"
                     >
                       <div>
-                        <span className="text-[9px] text-indigo-500 font-black uppercase tracking-wider block mb-2 flex items-center gap-1">
-                          <UserCheck className="w-3.5 h-3.5 text-pink-500" /> 
-                          <span>Account Statistics Summary</span>
+                        <span className="text-[10px] text-indigo-600 font-black uppercase tracking-wider block mb-3 flex items-center gap-1.5 border-b pb-1.5 border-indigo-100/30">
+                          <UserCheck className="w-4 h-4 text-pink-500" /> 
+                          <span>{lang === 'en' ? "Dashboard Stats" : "অ্যাকাউন্ট রিপোর্ট"}</span>
                         </span>
                         <div className="grid grid-cols-2 gap-2 text-center">
-                          <div className="bg-white p-2.5 rounded-xl text-xs border border-slate-100">
-                            <p className="text-[10px] text-slate-400 font-black">Total Spend</p>
-                            <p className="font-extrabold font-mono text-pink-600 text-[13.5px] mt-0.5">৳{myOrders.filter(o => o.status === 'Delivered').reduce((s, o) => s + o.amount, 0)}</p>
+                          <div className="bg-white p-3 rounded-xl border border-slate-100 shadow-3xs">
+                            <p className="text-[9px] text-slate-400 font-black uppercase">{lang === 'en' ? "Total Purchases" : "মোট কেনাকাটা"}</p>
+                            <p className="font-mono font-black text-pink-600 text-[15px] mt-1">৳{myOrders.reduce((s, o) => s + o.amount, 0)}</p>
                           </div>
-                          <div className="bg-white p-2.5 rounded-xl text-xs border border-slate-100">
-                            <p className="text-[10px] text-slate-400 font-black">My Orders</p>
-                            <p className="font-extrabold font-mono text-indigo-600 text-[13.5px] mt-0.5">{myOrders.length}</p>
+                          <div className="bg-white p-3 rounded-xl border border-slate-100 shadow-3xs">
+                            <p className="text-[9px] text-slate-400 font-black uppercase">{lang === 'en' ? "Order Count" : "অর্ডার সংখ্যা"}</p>
+                            <p className="font-mono font-black text-indigo-600 text-[15px] mt-1">{myOrders.length}</p>
                           </div>
                         </div>
                       </div>
-                      <div className="text-[10px] text-slate-400 font-bold block pt-2 text-right">Last login: Today</div>
+                      <div className="text-[9.5px] text-slate-400 font-bold block pt-3 text-right">
+                        {lang === 'en' ? "Status: Active today" : "লগইন স্ট্যাটাস: আজ সচল"}
+                      </div>
                     </motion.div>
                   )}
                 </div>
               )}
+            </div>
+            
             {/* 2. BOTTOM MY ORDERS HUB */}
             <div className="bg-white rounded-none sm:rounded-[24px] border-0 sm:border sm:border-slate-100 shadow-none sm:shadow-xs p-4 sm:p-6 md:p-8">
               <div className="mb-4 flex items-center justify-between font-sans border-b border-slate-100 pb-3">
@@ -1847,10 +2107,18 @@ export default function CustomerStore({
                 </h3>
                 <button 
                   onClick={() => {
-                    // Quick default view or info prompt
-                    showNotif("Filter your orders dynamically using the status buttons below.", "success");
+                    setShowMyOrdersPage(true);
+                    setShowCustProfilePage(false);
+                    setViewingProduct(null);
+                    setSelectedCat(null);
+                    setShowOnlyFavorites(false);
+                    setShowCartPage(false);
+                    setShowSupportPage(false);
+                    setShowShopPage(false);
+                    setShowResellerLandingPage(false);
+                    window.scrollTo({ top: 0, behavior: "smooth" });
                   }}
-                  className="text-[11px] sm:text-xs text-slate-400 hover:text-pink-500 font-extrabold transition-colors flex items-center gap-0.5 cursor-pointer"
+                  className="text-[11px] sm:text-xs text-slate-450 hover:text-pink-600 font-extrabold transition-colors flex items-center gap-0.5 cursor-pointer"
                 >
                   <span>View All Orders</span>
                   <ChevronRight className="w-3.5 h-3.5" />
@@ -1911,7 +2179,7 @@ export default function CustomerStore({
                     </button>
                   );
                 })}
-              </div>    </div>
+              </div>
 
               {/* Orders table & filter output container */}
               <div className="space-y-4">
@@ -2148,6 +2416,323 @@ export default function CustomerStore({
             </div>
           </div>
         </main>
+      ) : showMyOrdersPage && loggedCustomer ? (
+        <main className="flex-1 max-w-4xl mx-auto w-full px-0 sm:px-3 py-0 sm:py-8 animate-fade-in text-slate-800 pb-28 md:pb-12">
+          <div className="bg-white rounded-none sm:rounded-[24px] border-0 sm:border sm:border-slate-100 shadow-none sm:shadow-xs p-4 sm:p-6 md:p-8 relative overflow-hidden">
+            {/* Top design highlight stripe */}
+            <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-pink-500 via-indigo-500 to-amber-400" />
+            
+            {/* Sub-header inside My Orders screen */}
+            <div className="mb-6 flex items-center justify-between font-sans border-b border-slate-100 pb-3 mt-2">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    setShowMyOrdersPage(false);
+                    setShowCustProfilePage(true);
+                  }}
+                  className="p-1 hover:bg-slate-100 rounded-lg text-slate-500 hover:text-slate-800 transition-colors cursor-pointer"
+                  title="Back to Profile"
+                >
+                  <ChevronLeft className="w-5 h-5 font-bold" />
+                </button>
+                <h3 className="text-base sm:text-lg font-black text-slate-950 tracking-tight">
+                  {lang === 'en' ? "My Orders" : "আমার অর্ডারসমূহ"}
+                </h3>
+              </div>
+              <span className="text-[10px] sm:text-xs font-mono bg-pink-50 text-pink-600 px-2.5 py-1 rounded-full font-black border border-pink-100 shadow-3xs uppercase">
+                {myOrders.length} {lang === 'en' ? "Total Orders" : "টি মোট অর্ডার"}
+              </span>
+            </div>
+
+            {/* Daraz-Style Category Status Indicators (With beautiful responsive horizontal grid and count badges) */}
+            <div className="grid grid-cols-4 gap-2 mb-6 pt-2 font-sans">
+              {[
+                { 
+                  id: 'to_pay', 
+                  label: 'To Pay', 
+                  icon: ShoppingCart, 
+                  count: myOrders.filter(o => o.status === 'Pending').length 
+                },
+                { 
+                  id: 'to_ship', 
+                  label: 'To Ship', 
+                  icon: Truck, 
+                  count: myOrders.filter(o => o.status === 'Approved' || o.status === 'Processing' || o.status === 'Shipped').length 
+                },
+                { 
+                  id: 'received', 
+                  label: 'Received', 
+                  icon: ShieldCheck, 
+                  count: myOrders.filter(o => o.status === 'Delivered').length 
+                },
+                { 
+                  id: 'cancelled', 
+                  label: 'Return/Cancel', 
+                  icon: X, 
+                  count: myOrders.filter(o => o.status === 'Cancelled').length 
+                }
+              ].map((tab) => {
+                const IconComp = tab.icon;
+                const isActive = activeProfileTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => {
+                      setActiveProfileTab(tab.id as any);
+                      setEditingCustomerOrder(null);
+                    }}
+                    className={`relative flex flex-col items-center justify-center p-2 rounded-2xl transition-all cursor-pointer group select-none ${isActive ? 'text-pink-600 scale-[1.03]' : 'text-slate-400 hover:text-slate-705'}`}
+                  >
+                    {/* Icon Container with relative positioning for badge */}
+                    <div className={`relative p-2.5 rounded-2xl transition-all border ${isActive ? 'bg-pink-100/70 border-pink-300 text-pink-600 shadow-2xs' : 'bg-slate-100 hover:bg-slate-200/90 border-slate-250 text-slate-700 shadow-3xs'}`}>
+                      <IconComp className="w-5 h-5 font-bold" />
+                      {tab.count > 0 && (
+                        <span className="absolute -top-1.5 -right-1.5 bg-pink-500 text-white font-mono font-black text-[9px] px-1.5 py-0.5 rounded-full border border-white leading-none min-w-[16px] h-[16px] flex items-center justify-center shadow-xs">
+                          {tab.count}
+                        </span>
+                      )}
+                    </div>
+                    <span className={`text-[10px] sm:text-xs font-black mt-2 text-center leading-tight transition-all ${isActive ? 'text-pink-600 font-black' : 'text-slate-700 font-extrabold'}`}>
+                      {t(tab.label)}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Orders list outputs */}
+            <div className="space-y-4">
+              {editingCustomerOrder ? (
+                <motion.div 
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="bg-slate-50 border border-slate-150 p-5 rounded-2xl space-y-4 text-xs"
+                >
+                  <div className="flex justify-between items-center border-b pb-2 mb-1">
+                    <h4 className="font-extrabold text-sm text-slate-850">Edit Order Shipping Details</h4>
+                    <span className="font-mono text-[10px] font-bold text-slate-400">Order Ref: {editingCustomerOrder.id}</span>
+                  </div>
+                  
+                  <div className="form-group">
+                    <label className="text-[10px] text-zinc-400 font-extrabold uppercase block mb-1">Recipient Name</label>
+                    <input 
+                      type="text" 
+                      className="w-full px-3 py-2 border rounded-xl font-bold bg-white focus:outline-none focus:border-indigo-500" 
+                      value={editOrderName}
+                      onChange={(e) => setEditOrderName(e.target.value)}
+                    />
+                  </div>
+                  
+                  <div className="form-group">
+                    <label className="text-[10px] text-zinc-400 font-extrabold uppercase block mb-1">Contact Phone</label>
+                    <input 
+                      type="text" 
+                      className="w-full px-3 py-2 border rounded-xl font-mono font-bold bg-white focus:outline-none focus:border-indigo-500" 
+                      value={editOrderPhone}
+                      onChange={(e) => setEditOrderPhone(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label className="text-[10px] text-zinc-400 font-extrabold uppercase block mb-1">Delivery Address</label>
+                    <textarea 
+                      rows={2}
+                      className="w-full px-3 py-2 border rounded-xl font-medium bg-white focus:outline-none focus:border-indigo-500" 
+                      value={editOrderAddress}
+                      onChange={(e) => setEditOrderAddress(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="flex gap-2 pt-1">
+                    <button 
+                      onClick={() => {
+                        if (!editOrderName.trim() || !editOrderPhone.trim() || !editOrderAddress.trim()) {
+                          showNotif("All fields are required.", "error");
+                          return;
+                        }
+                        setOrders(prev => prev.map(o => {
+                          if (o.id === editingCustomerOrder.id) {
+                            return {
+                              ...o,
+                              custName: editOrderName,
+                              custPhone: editOrderPhone,
+                              custAddress: editOrderAddress,
+                              timeline: [
+                                ...o.timeline,
+                                { status: o.status, date: new Date().toLocaleString(), description: 'Shipping details updated by customer.', isCompleted: true }
+                              ]
+                            };
+                          }
+                          return o;
+                        }));
+                        setEditingCustomerOrder(null);
+                        showNotif("Order details updated successfully!", "success");
+                      }}
+                      className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold py-2.5 rounded-xl cursor-pointer"
+                    >
+                      Submit Corrected Details
+                    </button>
+                    <button 
+                      onClick={() => setEditingCustomerOrder(null)}
+                      className="px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold py-2.5 rounded-xl cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </motion.div>
+              ) : (
+                (() => {
+                  const list = myOrders.filter(o => {
+                    if (activeProfileTab === 'to_pay') return o.status === 'Pending';
+                    if (activeProfileTab === 'to_ship') return o.status === 'Approved' || o.status === 'Processing' || o.status === 'Shipped';
+                    if (activeProfileTab === 'received') return o.status === 'Delivered';
+                    if (activeProfileTab === 'cancelled') return o.status === 'Cancelled';
+                    return false;
+                  });
+
+                  if (list.length === 0) {
+                    return (
+                      <div className="text-center py-14 bg-slate-50 border border-slate-100 rounded-3xl animate-fade-in-up">
+                        <Package className="w-12 h-12 text-slate-200 mx-auto mb-2" />
+                        <p className="text-slate-400 text-sm font-black uppercase tracking-wider">No matching active orders</p>
+                        <p className="text-slate-400 text-[10px] font-bold mt-1 max-w-xs mx-auto">Items you submit, pay for, or cancel in the future will automatically reflect in this status group tab.</p>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="grid grid-cols-1 gap-2 animate-fade-in-up font-sans">
+                      {list.map((ord) => {
+                        const canCancel = ord.status === 'Pending';
+                        return (
+                          <div key={ord.id} className="bg-white p-2.5 sm:p-3 border border-slate-150 hover:border-slate-200 rounded-xl hover:shadow-xs transition-all flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 text-xs">
+                            <div className="flex-1 flex items-center gap-2.5 min-w-0">
+                              {ord.prodImg ? (
+                                <div className="w-10 h-10 rounded-lg bg-slate-50 border border-slate-100 p-0.5 flex items-center justify-center shrink-0">
+                                  <img src={ord.prodImg} alt={ord.productName} className="max-h-full max-w-full object-contain" referrerPolicy="no-referrer" />
+                                </div>
+                              ) : (
+                                <div className="w-10 h-10 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-center shrink-0 text-slate-300">
+                                  <Package className="w-4 h-4" />
+                                </div>
+                              )}
+
+                              <div className="flex-1 min-w-0 space-y-0.5">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="text-[9px] font-mono font-black text-indigo-950 uppercase bg-slate-150/70 px-1 py-0.2 rounded leading-none">
+                                    #{ord.id}
+                                  </span>
+                                  <span className={`text-[8.5px] font-black uppercase tracking-wide px-1.5 py-0.2 rounded-full border leading-tight ${
+                                    ord.status === 'Pending' ? 'bg-amber-50 text-amber-700 border-amber-200' :
+                                    ord.status === 'Cancelled' ? 'bg-rose-50 text-rose-750 border-rose-200' :
+                                    ord.status === 'Delivered' ? 'bg-emerald-50 text-emerald-705 border-emerald-200' : 'bg-pink-50 text-pink-700 border-pink-150'
+                                  }`}>
+                                    {ord.status}
+                                  </span>
+                                </div>
+
+                                <p className="font-extrabold text-slate-850 truncate text-[11px] leading-tight" title={ord.productName}>
+                                  {ord.productName}
+                                </p>
+
+                                <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10px] text-slate-400 font-semibold leading-none">
+                                  {ord.color && <span className="text-slate-500 font-bold">Finish: {ord.color}</span>}
+                                  <span>Qty: <b className="text-slate-600">{ord.qty}</b></span>
+                                  <span>•</span>
+                                  <span>Cost: <b className="text-pink-600 font-mono">৳{ord.amount}</b></span>
+                                  <span>•</span>
+                                  <span className="font-mono text-[8.5px]">{ord.date}</span>
+                                </div>
+
+                                <div className="text-[9px] text-slate-500 font-normal truncate mt-0.5">
+                                  <span className="text-slate-400 font-black uppercase text-[8px]">Send:</span> <b>{ord.custName}</b> ({ord.custPhone}) <span className="text-slate-400">• {ord.custAddress}</span>
+                                </div>
+
+                                {ord.advancePaid && ord.advancePaid > 0 ? (
+                                  <div className="text-emerald-600 font-black text-[8.5px] uppercase tracking-wider flex items-center gap-1 leading-none mt-0.5">
+                                    <span className="w-0.5 h-0.5 rounded-full bg-emerald-500 font-bold"></span>
+                                    ADV: ৳{ord.advancePaid} ({ord.paymentMethod})
+                                  </div>
+                                ) : null}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 shrink-0 justify-end pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-100 border-dashed">
+                              <button 
+                                onClick={() => handleOrderAgain(ord)}
+                                className="bg-pink-600 hover:bg-pink-700 text-white font-black px-2.5 py-1.5 rounded-lg text-[10px] uppercase flex items-center justify-center gap-1 cursor-pointer transition-all shadow-xs active:scale-95"
+                              >
+                                <ShoppingBag className="w-2.5 h-2.5" /> {t("Again")}
+                              </button>
+
+                              {ord.status !== 'Cancelled' && (
+                                <button 
+                                  onClick={() => handleTrackQuickSearch(ord.trackingId)}
+                                  className="bg-slate-100 hover:bg-slate-200 text-slate-850 border border-slate-250 font-extrabold px-2.5 py-1.5 rounded-lg text-[10px] uppercase flex items-center justify-center gap-1 cursor-pointer transition-all shadow-3xs"
+                                >
+                                  <Truck className="w-2.5 h-2.5 text-slate-500" /> {t("Track")}
+                                </button>
+                              )}
+
+                              {canCancel ? (
+                                orderIdToCancel === ord.id ? (
+                                  <div className="flex items-center gap-1 bg-rose-50 border border-rose-150 px-1.5 py-1 rounded-lg text-[9.5px] font-bold">
+                                    <span className="text-rose-700 animate-pulse text-[8px] uppercase font-black">{t("Cancel")}?</span>
+                                    <button
+                                      onClick={() => {
+                                        setOrders(prev => prev.map(o => {
+                                          if (o.id === ord.id) {
+                                            return {
+                                              ...o,
+                                              status: 'Cancelled' as OrderStatus,
+                                              timeline: [
+                                                ...o.timeline,
+                                                { status: 'Cancelled', date: new Date().toLocaleString(), description: 'Cancelled by customer.', isCompleted: true }
+                                              ]
+                                            };
+                                          }
+                                          return o;
+                                        }));
+                                        showNotif("Order cancelled successfully.", "success");
+                                        setOrderIdToCancel(null);
+                                      }}
+                                      className="bg-rose-600 hover:bg-rose-750 text-white px-1.5 py-0.5 rounded text-[8px] uppercase font-black cursor-pointer"
+                                    >
+                                      Yes
+                                    </button>
+                                    <button
+                                      onClick={() => setOrderIdToCancel(null)}
+                                      className="bg-slate-205 hover:bg-slate-300 text-slate-705 px-1 py-0.5 rounded text-[8px] font-black uppercase cursor-pointer"
+                                    >
+                                      No
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button 
+                                    onClick={() => setOrderIdToCancel(ord.id)}
+                                    className="bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 hover:border-rose-300 font-extrabold px-2.5 py-1.5 rounded-lg text-[10px] uppercase cursor-pointer"
+                                  >
+                                    {t("Cancel")}
+                                  </button>
+                                )
+                              ) : (
+                                ord.status !== 'Cancelled' && (
+                                  <span className="text-[9px] text-emerald-705 font-extrabold uppercase px-2 py-1 bg-emerald-50 border border-emerald-150 rounded-lg flex items-center gap-1 select-none animate-bounce">
+                                    <Check className="w-2.5 h-2.5 text-emerald-600 font-bold" /> Done
+                                  </span>
+                                )
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()
+              )}
+            </div>
+          </div>
+        </main>
       ) : showOnlyFavorites ? (
         <main className="flex-1 max-w-2xl mx-auto w-full px-0 sm:px-3 py-0 sm:py-8 animate-fade-in text-slate-800 pb-28 md:pb-12">
           <div className="bg-white rounded-none sm:rounded-[24px] border-0 sm:border sm:border-slate-100 shadow-none sm:shadow-xs p-4 sm:p-6 relative overflow-hidden">
@@ -2265,10 +2850,7 @@ export default function CustomerStore({
         </main>
       ) : showCartPage ? (
         <main className="flex-1 max-w-2xl mx-auto w-full px-0 sm:px-3 py-0 sm:py-8 animate-fade-in text-slate-800 pb-28 md:pb-12">
-          
           <div className="bg-white rounded-none sm:rounded-[24px] border-0 sm:border sm:border-slate-100/80 shadow-none sm:shadow-xs p-4 sm:p-6 relative overflow-hidden">
-            
-            {/* Soft pink highlight indicator at the top */}
             <div className="absolute top-0 left-0 right-0 h-1 bg-pink-500" />
 
             {cart.length === 0 ? (
@@ -2285,283 +2867,7 @@ export default function CustomerStore({
               </div>
             ) : isCheckingOut ? (
               /* CHECKOUT STEP VIEW OWNER BY CUSTOMER DETAILS FORM */
-              <div className="space-y-4 animate-fade-in text-xs font-semibold">
-                
-                {/* Back Link Header */}
-                <div className="flex items-center gap-2 mb-2 pb-2 border-b border-slate-100 justify-between">
-                  <button 
-                    onClick={() => setIsCheckingOut(false)}
-                    className="p-1 px-2.5 hover:bg-slate-50 text-slate-600 hover:text-slate-800 bg-white border border-slate-200 rounded-lg text-[10px] font-black cursor-pointer transition-all flex items-center gap-1 uppercase"
-                  >
-                    ← Back to Cart
-                  </button>
-                  <h4 className="font-extrabold text-[10.5px] text-slate-400 uppercase tracking-wider">
-                    Secure checkout portal
-                  </h4>
-                </div>
-
-                {/* Compact Cart overview */}
-                <div className="bg-slate-50/70 p-3 rounded-xl border border-slate-100 text-[11px] text-slate-500 font-bold space-y-1">
-                  <p className="text-[9px] text-slate-400 font-extrabold uppercase tracking-widest">ORDER SUMMARY</p>
-                  <p className="text-slate-700">You are placing an order for <b className="text-pink-600">{selectedCartItems.length} selected items</b>.</p>
-                  <div className="max-h-[90px] overflow-y-auto space-y-1 pt-1">
-                    {selectedCartItems.map(item => (
-                      <div key={item.cartId} className="flex items-center justify-between gap-2 text-[10px] bg-white px-2 py-1.5 rounded-md border border-slate-100">
-                        <span className="truncate text-slate-800 max-w-[200px]">{item.product.name} (x{item.qty})</span>
-                        <span className="font-mono text-slate-900 font-black">৳{item.product.discountPrice * item.qty}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Recipient details form */}
-                <div className="bg-white p-5 rounded-2xl border border-slate-150/80 shadow-xs space-y-4">
-                  <h4 className="font-extrabold text-xs sm:text-sm text-slate-900 uppercase tracking-wider flex items-center gap-2 border-b pb-2.5 border-slate-100">
-                    <MapPin className="w-4 h-4 text-pink-500 shrink-0" /> 
-                    {lang === 'en' ? 'Shipping & Delivery Address' : 'শিপিং ও কুরিয়ার ঠিকানা'}
-                  </h4>
-                  
-                  <div className="space-y-3">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="text-[10.5px] font-bold text-slate-500 uppercase block mb-1">
-                          {lang === 'en' ? 'Customer Name' : 'গ্রাহকের নাম'} <span className="text-red-500">*</span>
-                        </label>
-                        <div className="relative">
-                          <input 
-                            type="text" 
-                            disabled={isProfileMode}
-                            className={`w-full font-semibold border rounded-xl p-2.5 text-xs focus:ring-1 focus:ring-pink-400 focus:border-pink-400 focus:outline-none transition-all ${
-                              isProfileMode 
-                                ? 'bg-slate-50 text-slate-500 border-slate-205 cursor-not-allowed font-medium' 
-                                : 'bg-white border-slate-250 text-slate-800'
-                            }`}
-                            placeholder={lang === 'en' ? "Enter recipient name" : "অর্ডার রিসিভারের নাম লিখুন"}
-                            value={currentName}
-                            onChange={(e) => setGuestDetails({ ...guestDetails, name: e.target.value })}
-                          />
-                          {isProfileMode && (
-                            <span className="absolute right-3 top-3 text-[10px] bg-green-50 text-green-600 border border-green-200/50 rounded-md px-1.5 py-0.5 leading-none font-bold">
-                              ✓ Profile
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="text-[10.5px] font-bold text-slate-500 uppercase block mb-1">
-                          {lang === 'en' ? 'Phone Number' : 'মোবাইল নম্বর'} <span className="text-red-500">*</span>
-                        </label>
-                        <div className="relative">
-                          <input 
-                            type="tel" 
-                            disabled={isProfileMode}
-                            className={`w-full font-semibold border rounded-xl p-2.5 text-xs focus:ring-1 focus:ring-pink-400 focus:border-pink-400 focus:outline-none transition-all ${
-                              isProfileMode 
-                                ? 'bg-slate-50 text-slate-500 border-slate-205 cursor-not-allowed font-medium' 
-                                : 'bg-white border-slate-250 text-slate-800'
-                            }`}
-                            placeholder={lang === 'en' ? "e.g. 017XXXXXXXX" : "যেমন: ০১৭xxxxxxxx"}
-                            value={currentPhone}
-                            onChange={(e) => setGuestDetails({ ...guestDetails, phone: e.target.value })}
-                          />
-                          {isProfileMode && (
-                            <span className="absolute right-3 top-3 text-[10px] bg-green-50 text-green-600 border border-green-200/50 rounded-md px-1.5 py-0.5 leading-none font-bold">
-                              ✓ Verified
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Selecting district auto adds dynamic delivery charge */}
-                    <div>
-                      <label className="text-[10.5px] font-bold text-slate-500 uppercase block mb-1">
-                        {lang === 'en' ? 'Select Delivery Region/District' : 'ডেলিভারি জেলা/এলাকা নির্বাচন করুন'} <span className="text-red-500">*</span>
-                      </label>
-                      <select 
-                        value={checkoutDistrictId}
-                        onChange={(e) => setCheckoutDistrictId(e.target.value)}
-                        className="w-full bg-white border border-slate-250 rounded-xl p-2.5 font-bold text-xs text-slate-800 outline-none cursor-pointer focus:ring-1 focus:ring-pink-400 focus:border-pink-400"
-                      >
-                        <option value="">{lang === 'en' ? '-- Choose Location --' : '-- জেলা বা অঞ্চল নির্বাচন করুন --'}</option>
-                        {deliveryCharges.map(dc => (
-                          <option key={dc.id} value={dc.id}>{dc.district} ({lang === 'en' ? 'Delivery Fee' : 'ডেলিভারি চার্জ'}: ৳{dc.charge})</option>
-                        ))}
-                      </select>
-
-                      {/* Dynamic Charge visualizer badge inside form card */}
-                      {checkoutDistrictId ? (
-                        <div className="mt-2 flex items-center justify-between text-xs font-bold text-indigo-750 bg-indigo-50/50 p-3 rounded-xl border border-indigo-100/50 animate-fade-in">
-                          <span className="flex items-center gap-1.5">
-                            <Truck className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
-                            {lang === 'en' ? 'Selected Area Delivery Fee:' : 'আপনার নির্বাচিত এলাকার কুরিয়ার চার্জ:'}
-                          </span>
-                          <span className="text-sm font-black text-indigo-900">
-                            ৳{deliveryCharges.find(dc => dc.id === checkoutDistrictId)?.charge || 0}
-                          </span>
-                        </div>
-                      ) : (
-                        <p className="text-[9.5px] text-slate-400 font-bold mt-1 leading-normal italic">
-                          {lang === 'en' 
-                            ? '* Select district to automatically calculate real-time home delivery fee.' 
-                            : '* কুরিয়ার চার্জ হিসাব ও ডেলিভারি সঠিকভাবে নির্ধারণ করতে জেলা নির্বাচন করুন।'}
-                        </p>
-                      )}
-                    </div>
-
-                    {/* Detailed location details */}
-                    <div>
-                      <label className="text-[10.5px] font-bold text-slate-500 uppercase block mb-1">
-                        {lang === 'en' ? 'Full Courier Address' : 'বিস্তারিত কুরিয়ার ঠিকানা'} <span className="text-red-500">*</span>
-                      </label>
-                      <textarea 
-                        rows={2} 
-                        disabled={isProfileMode}
-                        className={`w-full font-semibold border rounded-xl p-2.5 text-xs focus:ring-1 focus:ring-pink-400 focus:border-pink-400 focus:outline-none leading-snug transition-all ${
-                          isProfileMode 
-                            ? 'bg-slate-50 text-slate-500 border-slate-205 cursor-not-allowed font-medium' 
-                            : 'bg-white border-slate-250 text-slate-800'
-                        }`}
-                        placeholder={lang === 'en' 
-                          ? "e.g. Area, House No, Road, Ward No, Police Station" 
-                          : "যেমন: হাউজ নং, রোড নং, থানা, উপ-জেলা ও জেলা"}
-                        value={currentAddress}
-                        onChange={(e) => setGuestDetails({ ...guestDetails, address: e.target.value })}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Tickbox Options beneath the form */}
-                  {loggedCustomer ? (
-                    <div className="pt-2 border-t border-slate-100 flex items-center mt-2">
-                      <label className="relative flex items-center gap-2 cursor-pointer group">
-                        <input 
-                          type="checkbox" 
-                          className="peer sr-only"
-                          checked={useProfileInfo}
-                          onChange={(e) => handleToggleUseProfileInfo(e.target.checked)}
-                        />
-                        <div className="w-4 h-4 rounded border border-slate-300 bg-white peer-checked:bg-pink-500 peer-checked:border-pink-500 flex items-center justify-center transition-all">
-                          <svg className="w-2.5 h-2.5 text-white stroke-[3.5] stroke-current" fill="none" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                          </svg>
-                        </div>
-                        <span className="text-[11px] font-extrabold text-slate-700 select-none group-hover:text-slate-900 transition-colors">
-                          {lang === 'en' ? 'Use my profile information' : 'আমার অ্যাকাউন্ট প্রোফাইলের তথ্য ব্যবহার করুন'}
-                        </span>
-                      </label>
-                    </div>
-                  ) : (
-                    <div className="pt-2 border-t border-slate-100 text-[10px] text-slate-400 font-bold flex items-center gap-1.5 mt-1">
-                      <Lock className="w-3 h-3 text-slate-300" />
-                      {lang === 'en' 
-                        ? 'Logging in allows you to autofill checkout details from saved profile.' 
-                        : 'লগইন থাকলে আপনার প্রোফাইল থেকে এই ফর্মটি স্বয়ংক্রিয়ভাবে পূরণ হতো।'}
-                    </div>
-                  )}
-                </div>
-
-                {/* Step 3: Advance Security Verification Payments if any item demands it */}
-                {(() => {
-                  const matchedDistrict = deliveryCharges.find(dc => dc.id === checkoutDistrictId);
-                  const deliveryCostAmount = matchedDistrict ? matchedDistrict.charge : 0;
-
-                  let totalAdvanceRequired = 0;
-                  if (advanceConfig && advanceConfig.requireAdvance) {
-                    if (advanceConfig.amountType === 'delivery') {
-                      totalAdvanceRequired = deliveryCostAmount;
-                    } else {
-                      totalAdvanceRequired = advanceConfig.fixedAmount || 0;
-                    }
-                  } else {
-                    totalAdvanceRequired = selectedCartItems.reduce((sum, item) => {
-                      if (item.product.requireAdvance) {
-                        return sum + (item.product.advanceAmount || 0) * item.qty;
-                      }
-                      return sum;
-                    }, 0);
-                  }
-
-                  if (totalAdvanceRequired <= 0) return null;
-                  if (!clickedPayToConfirm) return null;
-
-                  const activeChannels = advanceConfig.channels ? advanceConfig.channels.filter(c => c.isActive) : [];
-
-                  return (
-                    <div className="bg-amber-50/40 p-4 rounded-xl border border-amber-200/50 space-y-3.5 text-xs">
-                      <h4 className="font-extrabold text-xs text-amber-800 uppercase tracking-wide flex items-center gap-1.5 border-b border-amber-200/30 pb-1.5 animate-pulse">
-                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span> 3. Security Advance Required
-                      </h4>
-                      
-                      <div className="bg-amber-100/40 p-2.5 rounded-xl text-amber-900 font-bold leading-relaxed text-[11px]">
-                        {advanceConfig.instructionText || `অগ্রিম পেমেন্ট ৳${totalAdvanceRequired} আবশ্যক। নিচে দেয় যেকোনো একটি মাধ্যমে সেন্ড মানি বা ট্রান্সফার করে ট্রানজেকশন আইডি প্রদান করুন।`}
-                        {advanceConfig.amountType === 'delivery' && (
-                          <span className="block mt-1 font-extrabold text-rose-700">
-                            (অগ্রিম পরিমাণ = আপনার জেলাপাড়া ডেলিভারি চার্জ ৳<b>{totalAdvanceRequired}</b>)
-                          </span>
-                        )}
-                      </div>
-
-                      {activeChannels.length > 0 ? (
-                        <>
-                          {/* Account detail columns */}
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[10px] text-slate-500 bg-white p-2.5 rounded-xl border border-amber-100 font-medium">
-                            {activeChannels.map((chan, idx) => (
-                              <div key={chan.id} className={`flex flex-col p-1 ${idx >= 2 ? 'border-t sm:border-t-0 border-slate-100 pt-1.5 sm:pt-1' : ''} ${idx % 2 === 0 ? 'sm:border-r border-slate-100 sm:pr-2' : 'sm:pl-2'}`}>
-                                <span className="font-bold text-slate-900 flex items-center gap-1">
-                                  {chan.name} 
-                                  <span className="text-[8px] uppercase font-bold text-orange-600 bg-orange-50 px-1 rounded-sm leading-none py-0.5">{chan.methodType}</span>
-                                </span>
-                                <span className="font-mono text-slate-800 font-bold mt-0.5 select-all">{chan.accountNumber}</span>
-                              </div>
-                            ))}
-                          </div>
-
-                          {/* Selection tab pills */}
-                          <div className="space-y-2">
-                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Select Payment Channel</label>
-                            <div className="flex flex-wrap gap-1.5">
-                              {activeChannels.map(chan => (
-                                <button
-                                  key={chan.id}
-                                  type="button"
-                                  onClick={() => setCheckoutPaymentMethod(chan.name)}
-                                  className={`py-1.5 px-3 rounded-lg text-[10px] font-black uppercase transition-all tracking-wider border cursor-pointer ${
-                                    checkoutPaymentMethod === chan.name 
-                                      ? 'bg-amber-600 text-white border-amber-600 shadow-2xs' 
-                                      : 'bg-white hover:bg-slate-50 text-slate-600 border-slate-200'
-                                  }`}
-                                >
-                                  {chan.name}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        </>
-                      ) : (
-                        <div className="text-[10px] text-slate-400 font-semibold text-center border p-4 rounded-xl bg-white">
-                          No channels active currently. Please contact administrator for offline confirmation.
-                        </div>
-                      )}
-
-                      {checkoutPaymentMethod !== 'COD' && (
-                        <div className="space-y-1.5 pt-0.5">
-                          <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Sender's Transaction ID (TxID)</label>
-                          <input 
-                            type="text"
-                            className="form-input text-xs uppercase font-mono tracking-widest placeholder-slate-350 z-20"
-                            placeholder="e.g. 5K98JKD7WS"
-                            value={checkoutTxId}
-                            onChange={(e) => setCheckoutTxId(e.target.value.toUpperCase())}
-                          />
-                        </div>
-                      )}
-                    </div>
-                  );
-                })()}
-
-                {/* Total Invoice billing breakdowns */}
+              <div className="space-y-4 animate-fade-in text-xs font-semibold text-slate-800">
                 {(() => {
                   const matchedDistrict = deliveryCharges.find(dc => dc.id === checkoutDistrictId);
                   const deliveryCostAmount = matchedDistrict ? matchedDistrict.charge : 0;
@@ -2584,116 +2890,610 @@ export default function CustomerStore({
                   }
 
                   const isAdvanceEnabled = totalAdvanceRequired > 0;
+                  const activeChannels = advanceConfig.channels ? advanceConfig.channels.filter(c => c.isActive) : [];
 
-                  return (
-                    <>
-                      {/* Promo Code Apply Section */}
-                      <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-2 text-xs">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide block">
-                          {lang === 'en' ? 'Have a Promo Code?' : 'প্রোমো কোড আছে কি?'}
-                        </label>
-                        {appliedPromo ? (
-                          <div className="flex items-center justify-between bg-emerald-50 border border-emerald-250 p-2.5 rounded-lg text-xs leading-none animate-fade-in">
-                            <span className="font-extrabold text-emerald-800 flex items-center gap-1.5 font-mono">
-                              <Tag className="w-3.5 h-3.5 text-emerald-600" />
-                              {appliedPromo.code} {lang === 'en' ? 'Applied' : 'প্রযুক্ত হয়েছে'} (-৳{promoDiscountAmount})
-                            </span>
-                            <button
-                              type="button"
-                              onClick={handleRemovePromoCode}
-                              className="text-red-500 hover:text-red-700 font-extrabold focus:outline-none p-1 cursor-pointer"
-                              title={lang === 'en' ? "Remove Code" : "কোড সরান"}
-                            >
-                              <X className="w-4 h-4" />
-                            </button>
+                  if (!clickedPayToConfirm) {
+                    /* ========================================================== */
+                    /*   STAGE 1: SHIPPING DETAILS & ORDER SUMMARY                  */
+                    /* ========================================================== */
+                    return (
+                      <div className="space-y-6">
+                        {/* Header Banner */}
+                        <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-1">
+                          <button 
+                            type="button"
+                            onClick={() => setIsCheckingOut(false)}
+                            className="p-1 px-3 hover:bg-slate-50 text-slate-600 hover:text-slate-800 bg-white border border-slate-200 rounded-lg text-[10px] font-black cursor-pointer transition-all flex items-center gap-1 uppercase"
+                          >
+                            ← {lang === 'en' ? 'Back to Cart' : 'কার্টে ফিরে যান'}
+                          </button>
+                          <h4 className="font-extrabold text-[11px] text-slate-400 uppercase tracking-wider flex items-center gap-1">
+                            <span className="w-2 h-2 rounded-full bg-green-500 inline-block animate-pulse"></span>
+                            {lang === 'en' ? 'Secure Checkout (Step 1 of 2)' : 'নিরাপদ চেকআউট (ধাপ ১/২)'}
+                          </h4>
+                        </div>
+
+                        {/* Two Column Layout on Desktop */}
+                        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                          {/* Left Column: Shipping Form (7 cols) */}
+                          <div className="lg:col-span-7 bg-white p-5 rounded-2xl border border-slate-150/80 shadow-3xs space-y-4">
+                            <h4 className="font-extrabold text-xs sm:text-sm text-slate-900 uppercase tracking-wider flex items-center gap-2 border-b pb-2.5 border-slate-100">
+                              <MapPin className="w-4 h-4 text-pink-500 shrink-0" /> 
+                              {lang === 'en' ? 'Shipping & Delivery Address' : 'শিপিং ও কুরিয়ার ঠিকানা'}
+                            </h4>
+
+                            <div className="space-y-3">
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div>
+                                  <label className="text-[10.5px] font-bold text-slate-500 uppercase block mb-1">
+                                    {lang === 'en' ? 'Customer Name' : 'গ্রাহকের নাম'} <span className="text-red-500">*</span>
+                                  </label>
+                                  <div className="relative">
+                                    <input 
+                                      type="text" 
+                                      disabled={isProfileMode}
+                                      className={`w-full font-semibold border rounded-xl p-2.5 text-xs focus:ring-1 focus:ring-pink-400 focus:border-pink-400 focus:outline-none transition-all ${
+                                        isProfileMode 
+                                          ? 'bg-slate-50 text-slate-500 border-slate-200 cursor-not-allowed font-medium' 
+                                          : 'bg-white border-slate-250 text-slate-800 shadow-3xs'
+                                      }`}
+                                      placeholder={lang === 'en' ? "Enter recipient name" : "অর্ডার রিসিভারের নাম লিখুন"}
+                                      value={currentName}
+                                      onChange={(e) => setGuestDetails({ ...guestDetails, name: e.target.value })}
+                                    />
+                                    {isProfileMode && (
+                                      <span className="absolute right-3 top-2.5 text-[9px] bg-green-50 text-green-600 border border-green-250/50 rounded-md px-1.5 py-0.5 leading-none font-bold">
+                                        ✓ Profile
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+
+                                <div>
+                                  <label className="text-[10.5px] font-bold text-slate-500 uppercase block mb-1">
+                                    {lang === 'en' ? 'Phone Number' : 'মোবাইল নম্বর'} <span className="text-red-500">*</span>
+                                  </label>
+                                  <div className="relative">
+                                    <input 
+                                      type="tel" 
+                                      disabled={isProfileMode}
+                                      className={`w-full font-semibold border rounded-xl p-2.5 text-xs focus:ring-1 focus:ring-pink-400 focus:border-pink-400 focus:outline-none transition-all ${
+                                        isProfileMode 
+                                          ? 'bg-slate-50 text-slate-500 border-slate-205 cursor-not-allowed font-medium' 
+                                          : 'bg-white border-slate-250 text-slate-800 shadow-3xs'
+                                      }`}
+                                      placeholder={lang === 'en' ? "e.g. 017XXXXXXXX" : "যেমন: ০১৭xxxxxxxx"}
+                                      value={currentPhone}
+                                      onChange={(e) => setGuestDetails({ ...guestDetails, phone: e.target.value })}
+                                    />
+                                    {isProfileMode && (
+                                      <span className="absolute right-3 top-2.5 text-[9px] bg-green-50 text-green-600 border border-green-250/50 rounded-md px-1.5 py-0.5 leading-none font-bold">
+                                        ✓ Verified
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Selecting district auto adds dynamic delivery charge */}
+                              <div>
+                                <label className="text-[10.5px] font-bold text-slate-500 uppercase block mb-1">
+                                  {lang === 'en' ? 'Select Delivery Region/District' : 'ডেলিভারি জেলা/এলাকা নির্বাচন করুন'} <span className="text-red-500">*</span>
+                                </label>
+                                <select 
+                                  value={checkoutDistrictId}
+                                  onChange={(e) => setCheckoutDistrictId(e.target.value)}
+                                  className="w-full bg-white border border-slate-250 rounded-xl p-2.5 font-bold text-xs text-slate-800 outline-none cursor-pointer focus:ring-1 focus:ring-pink-400 focus:border-pink-400 shadow-3xs"
+                                >
+                                  <option value="">{lang === 'en' ? '-- Choose Location --' : '-- জেলা বা অঞ্চল নির্বাচন করুন --'}</option>
+                                  {deliveryCharges.map(dc => (
+                                    <option key={dc.id} value={dc.id}>{dc.district} ({lang === 'en' ? 'Delivery Fee' : 'ডেলিভারি চার্জ'}: ৳{dc.charge})</option>
+                                  ))}
+                                </select>
+
+                                {/* Dynamic Charge visualizer badge */}
+                                {checkoutDistrictId ? (
+                                  <div className="mt-2.5 flex items-center justify-between text-[11px] font-bold text-pink-700 bg-pink-50/40 p-3 rounded-xl border border-pink-100/40 animate-fade-in">
+                                    <span className="flex items-center gap-1.5">
+                                      <Truck className="w-4.5 h-4.5 text-pink-500 shrink-0" />
+                                      {lang === 'en' ? 'Selected Area Delivery Fee:' : 'আপনার নির্বাচিত এলাকার কুরিয়ার চার্জ:'}
+                                    </span>
+                                    <span className="text-sm font-black text-pink-600">
+                                      ৳ {deliveryCharges.find(dc => dc.id === checkoutDistrictId)?.charge || 0}
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <p className="text-[10px] text-slate-400 font-bold mt-1.5 leading-normal italic">
+                                    {lang === 'en' 
+                                      ? '* Select district to automatically calculate real-time home delivery fee.' 
+                                      : '* কুরিয়ার চার্জ হিসাব ও ডেলিভারি সঠিকভাবে নির্ধারণ করতে জেলা নির্বাচন করুন।'}
+                                  </p>
+                                )}
+                              </div>
+
+                              {/* Detailed location details */}
+                              <div>
+                                <label className="text-[10.5px] font-bold text-slate-500 uppercase block mb-1">
+                                  {lang === 'en' ? 'Full Courier Address' : 'বিস্তারিত কুরিয়ার ঠিকানা'} <span className="text-red-500">*</span>
+                                </label>
+                                <textarea 
+                                  rows={2} 
+                                  disabled={isProfileMode}
+                                  className={`w-full font-semibold border rounded-xl p-2.5 text-xs focus:ring-1 focus:ring-pink-400 focus:border-pink-400 focus:outline-none leading-snug transition-all ${
+                                    isProfileMode 
+                                      ? 'bg-slate-50 text-slate-500 border-slate-205 cursor-not-allowed font-medium' 
+                                      : 'bg-white border-slate-250 text-slate-800 shadow-3xs'
+                                  }`}
+                                  placeholder={lang === 'en' 
+                                    ? "e.g. Area, House No, Road, Ward No, Police Station" 
+                                    : "যেমন: হাউজ নং, রোড নং, থানা, উপ-জেলা ও জেলা"}
+                                  value={currentAddress}
+                                  onChange={(e) => setGuestDetails({ ...guestDetails, address: e.target.value })}
+                                />
+                              </div>
+                            </div>
+
+                            {/* Tickbox Options */}
+                            {loggedCustomer ? (
+                              <div className="pt-3 border-t border-slate-100 flex items-center">
+                                <label className="relative flex items-center gap-2 cursor-pointer group">
+                                  <input 
+                                    type="checkbox" 
+                                    className="peer sr-only"
+                                    checked={useProfileInfo}
+                                    onChange={(e) => handleToggleUseProfileInfo(e.target.checked)}
+                                  />
+                                  <div className="w-4 h-4 rounded border border-slate-300 bg-white peer-checked:bg-pink-500 peer-checked:border-pink-500 flex items-center justify-center transition-all">
+                                    <svg className="w-2.5 h-2.5 text-white stroke-[3.5] stroke-current" fill="none" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                                    </svg>
+                                  </div>
+                                  <span className="text-[11px] font-extrabold text-slate-700 select-none group-hover:text-slate-900 transition-colors">
+                                    {lang === 'en' ? 'Use my profile information' : 'আমার অ্যাকাউন্ট প্রোফাইলের তথ্য ব্যবহার করুন'}
+                                  </span>
+                                </label>
+                              </div>
+                            ) : (
+                              <div className="pt-2 border-t border-slate-100 text-[10px] text-slate-400 font-bold flex items-center gap-1.5 mt-1">
+                                <Lock className="w-3 h-3 text-slate-300" />
+                                {lang === 'en' 
+                                  ? 'Logging in allows you to autofill checkout details from saved profile.' 
+                                  : 'লগইন থাকলে আপনার প্রোফাইল থেকে এই ফর্মটি স্বয়ংক্রিয়ভাবে পূরণ হতো।'}
+                              </div>
+                            )}
                           </div>
-                        ) : (
-                          <div className="flex items-center gap-1.5">
-                            <input
-                              type="text"
-                              value={promoCodeInput}
-                              onChange={(e) => setPromoCodeInput(e.target.value)}
-                              placeholder={lang === 'en' ? "e.g. FLASH100" : "যেমন: FLASH100"}
-                              className="flex-1 bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold uppercase placeholder-slate-400 focus:outline-none focus:border-pink-400 focus:ring-1 focus:ring-pink-400"
-                            />
-                            <button
-                              type="button"
-                              onClick={handleApplyPromoCode}
-                              className="bg-pink-600 hover:bg-pink-700 text-white font-extrabold px-3 py-1.5 rounded-lg text-xs uppercase tracking-wider cursor-pointer transition-colors"
-                            >
-                              {lang === 'en' ? 'Apply' : 'প্রয়োগ'}
-                            </button>
+
+                          {/* Right Column: Order Summary & Invoiced total (5 cols) */}
+                          <div className="lg:col-span-5 space-y-4">
+                            <div className="bg-white p-5 rounded-2xl border border-slate-150/80 shadow-3xs space-y-4">
+                              <h4 className="font-extrabold text-xs sm:text-sm text-slate-900 uppercase tracking-wider border-b pb-2.5 border-slate-100 flex items-center justify-between">
+                                <span>{lang === 'en' ? 'Order Items' : 'অর্ডারকৃত পণ্য'}</span>
+                                <span className="text-[10px] bg-slate-100 px-2.5 py-1 rounded-full text-slate-500 leading-none">{selectedCartItems.length} items</span>
+                              </h4>
+
+                              <div className="max-h-[140px] overflow-y-auto space-y-2 pr-1">
+                                {selectedCartItems.map(item => (
+                                  <div key={item.cartId} className="flex gap-2.5 items-center bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                                    <img src={item.product.img} className="w-8 h-8 rounded object-cover border bg-white shrink-0" />
+                                    <div className="flex-1 min-w-0">
+                                      <span className="block text-[11px] font-bold text-slate-800 truncate">{item.product.name}</span>
+                                      <span className="block text-[10px] text-slate-400 font-bold font-mono">Qty: {item.qty} {item.color && `| Color: ${item.color}`}</span>
+                                    </div>
+                                    <span className="font-mono text-slate-705 text-xs font-black">৳{item.product.discountPrice * item.qty}</span>
+                                  </div>
+                                ))}
+                              </div>
+
+                              {/* Promo Code Apply Section */}
+                              <div className="bg-slate-50 p-3 rounded-xl border border-slate-150 space-y-1.5">
+                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-wide block">
+                                  {lang === 'en' ? 'Have a Promo Code?' : 'প্রোমো কোড আছে কি?'}
+                                </label>
+                                {appliedPromo ? (
+                                  <div className="flex items-center justify-between bg-emerald-50 border border-emerald-200 p-2 rounded-lg text-xs animate-fade-in text-[11px] font-bold">
+                                    <span className="font-extrabold text-emerald-800 flex items-center gap-1.2 font-mono font-bold leading-none">
+                                      <Tag className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                      {appliedPromo.code} (-৳{promoDiscountAmount})
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={handleRemovePromoCode}
+                                      className="text-red-500 hover:text-red-700 font-extrabold focus:outline-none p-0.5 cursor-pointer"
+                                    >
+                                      <X className="w-4 h-4" />
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center gap-1.5">
+                                    <input
+                                      type="text"
+                                      value={promoCodeInput}
+                                      onChange={(e) => setPromoCodeInput(e.target.value)}
+                                      placeholder={lang === 'en' ? "e.g. FLASH100" : "যেমন: FLASH100"}
+                                      className="flex-1 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold uppercase placeholder-slate-400 focus:outline-none focus:border-pink-400 focus:ring-1 focus:ring-pink-400"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={handleApplyPromoCode}
+                                      className="bg-pink-500 hover:bg-pink-600 text-white font-extrabold px-3 py-1.5 rounded-lg text-xs uppercase tracking-wider cursor-pointer transition-colors"
+                                    >
+                                      {lang === 'en' ? 'Apply' : 'প্রয়োগ'}
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Billing invoice breakdowns */}
+                              <div className="space-y-1.5 pt-1 text-[11px] text-slate-500 font-bold border-t border-slate-100">
+                                <div className="flex justify-between items-center text-[11.5px]">
+                                  <span>{lang === 'en' ? 'Merchandise Subtotal' : 'পণ্যের সাবটোটাল'}</span>
+                                  <span className="font-extrabold text-slate-805">৳ {cartSubtotal}</span>
+                                </div>
+                                {promoDiscountAmount > 0 && (
+                                  <div className="flex justify-between items-center text-emerald-600 animate-fade-in">
+                                    <span className="flex items-center gap-1 font-bold">
+                                      <Tag className="w-3.5 h-3.5 shrink-0" />
+                                      {lang === 'en' ? 'Discount Code:' : 'ডিসকাউন্ট কোড:'}
+                                    </span>
+                                    <span className="font-mono font-extrabold">-৳ {promoDiscountAmount}</span>
+                                  </div>
+                                )}
+                                <div className="flex justify-between items-center">
+                                  <span>{lang === 'en' ? 'Courier Shipping Cost' : 'কুরিয়ার ও ডেলিভারি ফি'}</span>
+                                  <span className="font-extrabold text-pink-650">৳ {deliveryCostAmount}</span>
+                                </div>
+                                <div className="flex justify-between items-center text-xs sm:text-sm border-t border-dashed border-slate-200 pt-2 text-slate-900 font-extrabold mt-2">
+                                  <span className="text-slate-805 uppercase tracking-wide text-[10px] font-black">{lang === 'en' ? 'Total Invoice Amount' : 'সর্বমোট ইনভয়েস বিল'}</span>
+                                  <span className="text-[#f85606] text-sm sm:text-base font-black">৳ {finalTotalSum}</span>
+                                </div>
+                              </div>
+
+                              {/* PROCEED TO PAY ORANGE ACTION BUTTON */}
+                              <div className="pt-2">
+                                <button 
+                                  type="button"
+                                  onClick={() => {
+                                    if (!currentName.trim() || !currentPhone.trim() || !currentAddress.trim()) {
+                                      showNotif(lang === 'en' ? "Please complete recipient name, mobile number, and address." : "অনুগ্রহ করে নাম, মোবাইল নম্বর এবং ঠিকানা পূরণ করুন।", "error");
+                                      return;
+                                    }
+                                    if (!checkoutDistrictId) {
+                                      showNotif(lang === 'en' ? "Please select a Delivery District Region first." : "অনুগ্রহ করে ডেলিভারি এলাকা বা জেলা নির্বাচন করুন।", "error");
+                                      return;
+                                    }
+                                    setClickedPayToConfirm(true);
+                                    window.scrollTo({ top: 0, behavior: "smooth" });
+                                    showNotif(lang === 'en' ? "Payment gateway loaded. Select your method securely." : "পেমেন্ট মাধ্যমসমূহ লোড হয়েছে। অনুগ্রহ করে আপনার পেমেন্ট মাধ্যমটি নির্বাচন করুন।", "success");
+                                  }}
+                                  className="w-full bg-[#f85606] hover:bg-[#d04600] text-white font-extrabold py-3 px-5 rounded-xl flex items-center justify-between text-xs uppercase tracking-wider transition-all shadow-md active:scale-[0.98] cursor-pointer"
+                                >
+                                  <span>{lang === 'en' ? 'Proceed to Pay' : 'পেমেন্ট করুন'}</span>
+                                  <span className="font-mono font-black text-sm text-amber-100">৳ {finalTotalSum}</span>
+                                </button>
+                              </div>
+                            </div>
                           </div>
-                        )}
+                        </div>
                       </div>
+                    );
+                  } else {
+                    /* ========================================================== */
+                    /*   STAGE 2: SELECT PAYMENT METHOD (PRECISE SCREEN REPLICA)    */
+                    /* ========================================================== */
+                    return (
+                      <div className="space-y-4 max-w-xl mx-auto bg-white p-4 sm:p-6 rounded-2xl border border-slate-200 shadow-sm animate-fade-in font-sans">
+                        
+                        {/* Header Title & Close Button X */}
+                        <div className="flex items-center justify-between border-b pb-2 mb-2">
+                          <button 
+                            type="button"
+                            onClick={() => setClickedPayToConfirm(false)}
+                            className="bg-slate-50 hover:bg-slate-100 border text-slate-600 font-extrabold text-[10px] px-2.5 py-1 rounded bg-white hover:bg-slate-50"
+                          >
+                            ← Back
+                          </button>
+                          <h3 className="font-extrabold text-sm sm:text-base text-slate-800 text-center flex-1 select-none font-display">
+                            Select Payment Method
+                          </h3>
+                          <button 
+                            onClick={() => setClickedPayToConfirm(false)}
+                            className="text-slate-400 hover:text-slate-600 transition-colors p-1 flex items-center justify-center"
+                          >
+                            <X className="w-5 h-5 shrink-0" />
+                          </button>
+                        </div>
 
-                      <div className="bg-slate-50/50 p-3.5 rounded-xl border border-slate-100/70 space-y-2 text-xs text-slate-500 font-bold">
-                        <div className="flex justify-between items-center text-[11px]">
-                          <span>Cart Products Subtotal</span>
-                          <span className="font-extrabold text-slate-800">৳{cartSubtotal}</span>
+                        {/* Light-blue Banner Alert Notification */}
+                        <div className="bg-blue-50/70 border border-blue-250/30 text-[#0066cc] p-3 rounded-xl flex items-start gap-2.5 text-[10.5px] font-bold leading-normal">
+                          <Info className="w-4 h-4 text-[#0066cc] shrink-0 mt-0.5" />
+                          <span>Collect payment voucher & get extra savings on your purchase!</span>
                         </div>
-                        {appliedPromo && (
-                          <div className="flex justify-between items-center text-[11px] text-emerald-600 animate-fade-in">
-                            <span className="flex items-center gap-1 font-bold">
-                              <Tag className="w-3.5 h-3.5" />
-                              Promo Code Discount ({appliedPromo.code}):
-                            </span>
-                            <span className="font-mono font-extrabold text-emerald-700">-৳{promoDiscountAmount}</span>
-                          </div>
-                        )}
-                        <div className="flex justify-between items-center text-[11px]">
-                          <span>Verified Delivery Fee ({matchedDistrict ? matchedDistrict.district : 'Not selected'})</span>
-                          <span className="font-extrabold text-indigo-900">৳{deliveryCostAmount}</span>
-                        </div>
-                        {isAdvanceEnabled && clickedPayToConfirm && (
-                          <div className="flex justify-between text-[11px] text-amber-700 bg-amber-50/50 p-2.5 rounded-xl border border-amber-100 font-semibold animate-pulse">
-                            <span className="flex items-center gap-1">🔔 Pending Advance Verification</span>
-                            <span className="font-black text-amber-900">৳{totalAdvanceRequired}</span>
-                          </div>
-                        )}
-                        <div className="flex justify-between items-center text-sm border-t border-dashed border-slate-200 pt-2 text-slate-900 font-extrabold">
-                          <span className="text-slate-800 uppercase tracking-wide text-xs">Total Invoiced Amount</span>
-                          <span className="text-pink-600 text-sm sm:text-base font-black">৳{finalTotalSum}</span>
-                        </div>
-                      </div>
 
-                      {/* Checkout Submission Actions */}
-                      <div className="flex flex-col sm:flex-row gap-2 pt-1">
-                        <button 
-                          onClick={() => setIsCheckingOut(false)}
-                          className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold py-3 rounded-lg text-xs uppercase tracking-wider cursor-pointer text-center"
-                        >
-                          Back To Cart
-                        </button>
-                        {isAdvanceEnabled && !clickedPayToConfirm ? (
+                        {/* Recommended Method Container */}
+                        <div className="space-y-2 mt-4">
+                          <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider select-none">
+                            Recommended method(s)
+                          </p>
                           <button 
                             type="button"
                             onClick={() => {
-                              if (!checkoutDistrictId) {
-                                showNotif("Please select a Delivery District Region first.", "error");
-                                return;
-                              }
-                              setClickedPayToConfirm(true);
-                              showNotif("Security advance details loaded below. Please proceed with payment verification.", "success");
+                              setCheckoutPaymentMethod('Card');
+                              showNotif("CreditCard selected.", "success");
                             }}
-                            className="flex-1 bg-gradient-to-r from-orange-400 to-pink-500 text-white font-extrabold py-3 rounded-lg text-xs uppercase tracking-wider transition-all shadow active:scale-95 cursor-pointer text-center"
+                            className={`w-full bg-white border rounded-xl p-3 flex items-center justify-between gap-3 text-left transition-all hover:bg-slate-50 cursor-pointer ${
+                              checkoutPaymentMethod === 'Card' ? 'border-pink-500 bg-pink-100/10 ring-1 ring-pink-500' : 'border-slate-150'
+                            }`}
                           >
-                            Pay to Confirm
+                            <div className="flex items-center gap-3">
+                              <div className="p-2.5 bg-blue-50 text-blue-600 rounded-lg shrink-0">
+                                <CreditCard className="w-4.5 h-4.5" />
+                              </div>
+                              <div>
+                                <span className="block text-[11.5px] font-black text-slate-800">Credit/Debit Card</span>
+                                <span className="block text-[9.5px] text-slate-400 font-bold font-mono">Credit/Debit Card</span>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <span className="text-[8px] uppercase font-bold text-slate-400 bg-slate-50 px-1 rounded border leading-none py-0.5">Visa / MC</span>
+                              <ChevronRight className="w-4 h-4 text-slate-400" />
+                            </div>
                           </button>
-                        ) : (
+                        </div>
+
+                        {/* Other Payment Methods List Container */}
+                        <div className="space-y-2.5 mt-4">
+                          <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider select-none">
+                            Other Payment Methods
+                          </p>
+
+                          <div className="divide-y divide-slate-150 border border-slate-150 rounded-xl overflow-hidden shadow-3xs">
+                            
+                            {/* bKash Selection Item */}
+                            <button 
+                              type="button"
+                              onClick={() => {
+                                setCheckoutPaymentMethod('bKash');
+                                setCheckoutTxId('');
+                              }}
+                              className={`w-full bg-white p-3.5 flex items-center justify-between gap-3 text-left transition-all hover:bg-slate-100/30 cursor-pointer ${
+                                checkoutPaymentMethod === 'bKash' ? 'bg-pink-100/10' : ''
+                              }`}
+                            >
+                              <div className="flex items-center gap-3">
+                                <div className="w-9 h-9 rounded-full bg-pink-500 text-white flex items-center justify-center font-black shrink-0 shadow-3xs border border-pink-400 text-xs">
+                                  bK
+                                </div>
+                                <div>
+                                  <span className="block text-[11.5px] font-black text-slate-800">Save bKash Account</span>
+                                  <span className="block text-[9.5px] text-slate-400 font-bold select-none">Bkash instant personal account validation</span>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                {checkoutPaymentMethod === 'bKash' && <span className="w-2 h-2 rounded-full bg-pink-500 animate-pulse"></span>}
+                                <ChevronRight className="w-4 h-4 text-slate-400" />
+                              </div>
+                            </button>
+
+                            {/* Nagad Selection Item */}
+                            <button 
+                              type="button"
+                              onClick={() => {
+                                setCheckoutPaymentMethod('Nagad');
+                                setCheckoutTxId('');
+                              }}
+                              className={`w-full bg-white p-3.5 flex items-center justify-between gap-3 text-left transition-all hover:bg-slate-100/30 cursor-pointer ${
+                                checkoutPaymentMethod === 'Nagad' ? 'bg-orange-100/10' : ''
+                              }`}
+                            >
+                              <div className="flex items-center gap-3">
+                                <div className="w-9 h-9 rounded-full bg-orange-500 text-white flex items-center justify-center font-black shrink-0 shadow-3xs border border-orange-400 text-xs text-orange-100">
+                                  Ng
+                                </div>
+                                <div>
+                                  <span className="block text-[11.5px] font-black text-slate-800">Nagad Pay</span>
+                                  <span className="block text-[9.5px] text-slate-400 font-bold select-none">Secure instant Nagad pay-out channels</span>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                {checkoutPaymentMethod === 'Nagad' && <span className="w-2 h-2 rounded-full bg-orange-500 animate-pulse"></span>}
+                                <ChevronRight className="w-4 h-4 text-slate-400" />
+                              </div>
+                            </button>
+
+                            {/* Rocket Selection Item */}
+                            <button 
+                              type="button"
+                              onClick={() => {
+                                setCheckoutPaymentMethod('Rocket');
+                                setCheckoutTxId('');
+                              }}
+                              className={`w-full bg-white p-3.5 flex items-center justify-between gap-3 text-left transition-all hover:bg-slate-100/30 cursor-pointer ${
+                                checkoutPaymentMethod === 'Rocket' ? 'bg-purple-100/10' : ''
+                              }`}
+                            >
+                              <div className="flex items-center gap-3">
+                                <div className="w-9 h-9 rounded-full bg-indigo-600 text-white flex items-center justify-center font-black shrink-0 shadow-3xs border border-indigo-400 text-xs text-indigo-100">
+                                  Rk
+                                </div>
+                                <div>
+                                  <span className="block text-[11.5px] font-black text-slate-800">Rocket Pay</span>
+                                  <span className="block text-[9.5px] text-slate-400 font-bold select-none">DBBL Rocket payment transaction</span>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                {checkoutPaymentMethod === 'Rocket' && <span className="w-2 h-2 rounded-full bg-indigo-600 animate-pulse"></span>}
+                                <ChevronRight className="w-4 h-4 text-slate-400" />
+                              </div>
+                            </button>
+
+                            {/* Cash on Delivery (COD) Selection Item */}
+                            <button 
+                              type="button"
+                              onClick={() => {
+                                setCheckoutPaymentMethod('COD');
+                                setCheckoutTxId('');
+                              }}
+                              className={`w-full bg-white p-3.5 flex items-center justify-between gap-3 text-left transition-all hover:bg-slate-100/30 cursor-pointer ${
+                                checkoutPaymentMethod === 'COD' ? 'bg-green-100/10' : ''
+                              }`}
+                            >
+                              <div className="flex items-center gap-3">
+                                <div className="p-2 bg-emerald-50 text-emerald-600 rounded-full shrink-0 shadow-empty w-9 h-9 flex items-center justify-center font-black border border-emerald-100">
+                                  <Truck className="w-4.5 h-4.5" />
+                                </div>
+                                <div>
+                                  <span className="block text-[11.5px] font-black text-slate-808 font-sans">Cash on Delivery</span>
+                                  <span className="block text-[9.5px] text-slate-400 font-bold select-none font-sans">Pay at your shipping doorstep handoff!</span>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                {checkoutPaymentMethod === 'COD' && <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>}
+                                <ChevronRight className="w-4 h-4 text-slate-400" />
+                              </div>
+                            </button>
+
+                            {/* Instalment Item (Grayed/Inactive) */}
+                            <div className="w-full bg-slate-50 p-3.5 flex items-center justify-between gap-3 text-left cursor-not-allowed opacity-60">
+                              <div className="flex items-center gap-3">
+                                <div className="p-2 bg-slate-100 text-slate-400 rounded-full shrink-0 w-9 h-9 flex items-center justify-center">
+                                  <Calendar className="w-4.5 h-4.5" />
+                                </div>
+                                <div>
+                                  <span className="block text-[11.5px] font-black text-slate-400 select-none font-sans">Instalment (EMI)</span>
+                                  <span className="block text-[9.5px] text-slate-400 font-medium select-none font-sans">Instalment option is disabled for checkout</span>
+                                </div>
+                              </div>
+                              <ChevronRight className="w-4 h-4 text-slate-300" />
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* SPECIFIC INSTRUCTION & TXID BOXES IF ADVANCE CHANNEL SPECIFIED */}
+                        {(() => {
+                          if (checkoutPaymentMethod === 'COD') {
+                            if (isAdvanceEnabled) {
+                              return (
+                                <div className="p-3.5 rounded-xl border border-amber-300 bg-amber-50/50 text-[11px] text-amber-805 font-bold mt-2 animate-fade-in space-y-1 font-sans">
+                                  <span className="block text-amber-900 font-extrabold flex items-center gap-1.2">
+                                    ⚠️ Action Required for Cash on Delivery (COD)
+                                  </span>
+                                  <span>
+                                    শপিং কার্ট আইটেমের জন্য নিরাপত্তা এডভান্স কুরিয়ার ফি ৳<b>{totalAdvanceRequired}</b> আবশ্যক। দয়া করে bKash, Nagad অথবা Rocket পেমেন্ট মাধ্যম নির্বাচন করে অগ্রিম প্রদান সম্পন্ন করুন।
+                                  </span>
+                                </div>
+                              );
+                            }
+                            return (
+                              <div className="p-3.5 rounded-xl border border-emerald-200 bg-emerald-50/50 text-[11px] text-emerald-800 font-bold mt-2 animate-fade-in font-sans">
+                                <span>No advance required. Pay full ৳{finalTotalSum} at delivery point handoff!</span>
+                              </div>
+                            );
+                          }
+
+                          if (checkoutPaymentMethod === 'Card') {
+                            return (
+                              <div className="p-3.5 rounded-xl border border-blue-200 bg-blue-50/50 text-[11px] text-blue-800 font-bold mt-2 animate-fade-in space-y-2 font-sans">
+                                <span className="block font-extrabold text-blue-900">Credit/Debit Online Checkout Gateway Mock</span>
+                                <span>Secure online mock gateway has been pre-selected. After confirming the order, wait while details are validated.</span>
+                              </div>
+                            );
+                          }
+
+                          // Selected an advance channel: bKash, Nagad, Rocket
+                          const matchedChannel = activeChannels.find(c => c.name.toLowerCase().includes(checkoutPaymentMethod.toLowerCase()) || checkoutPaymentMethod.toLowerCase().includes(c.name.toLowerCase()) || checkoutPaymentMethod.toLowerCase().includes(c.methodType.toLowerCase()));
+                          const selectedChannelObj = matchedChannel || (activeChannels.length > 0 ? activeChannels[0] : null);
+
+                          return (
+                            <div className="bg-amber-50/50 p-4 rounded-xl border border-amber-200/60 space-y-3 mt-3 animate-fade-in font-sans">
+                              <h4 className="font-extrabold text-[11px] text-amber-850 uppercase tracking-wider flex items-center gap-1.5 font-display">
+                                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
+                                {checkoutPaymentMethod} {lang === 'en' ? 'Gateway Instructions' : 'গেটওয়ে নির্দেশনাবলী'}
+                              </h4>
+
+                              {selectedChannelObj ? (
+                                <div className="space-y-4 font-sans">
+                                  <div className="bg-white p-3 rounded-lg border border-amber-100 font-bold text-xs space-y-1 text-slate-705">
+                                    <div className="flex items-center justify-between flex-wrap gap-1">
+                                      <span className="text-slate-500 uppercase text-[9px] font-black">{checkoutPaymentMethod} {lang === 'en' ? 'Account Number' : 'একাউন্ট নম্বর'} ({selectedChannelObj.methodType})</span>
+                                      <button 
+                                        type="button"
+                                        onClick={() => {
+                                          navigator.clipboard.writeText(selectedChannelObj.accountNumber);
+                                          showNotif("Account Number copied!", "success");
+                                        }}
+                                        className="text-[9.5px] bg-slate-100 hover:bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded leading-none transition-colors border animate-fade-in"
+                                      >
+                                        Copy Code
+                                      </button>
+                                    </div>
+                                    <div className="text-sm font-black text-slate-808 font-mono tracking-wide select-all">{selectedChannelObj.accountNumber}</div>
+                                  </div>
+
+                                  <p className="text-[10px] text-amber-750 leading-relaxed font-bold bg-white p-2.5 rounded-lg border border-amber-105/50">
+                                    {advanceConfig.instructionText || `কুরিয়ার অগ্রিম ভেরিফিকেশন পেমেন্ট ৳${totalAdvanceRequired} সেন্ড মানি করুন। নিচে সঠিক ট্রানজেকশন আইডি প্রদান করুন।`}
+                                  </p>
+
+                                  <div className="space-y-1 md:block hidden">
+                                    <label className="text-[9.5px] font-black text-slate-500 uppercase tracking-wider block">Sender's Mobile Number</label>
+                                    <input 
+                                      type="tel"
+                                      className="w-full text-xs bg-white border border-slate-205 rounded-lg p-2 font-mono font-bold"
+                                      placeholder="e.g. 017XXXXXXXX"
+                                      value={checkoutSenderNo}
+                                      onChange={(e) => setCheckoutSenderNo(e.target.value)}
+                                    />
+                                  </div>
+
+                                  <div className="space-y-1">
+                                    <label className="text-[9.5px] font-black text-slate-500 uppercase tracking-wider block">Transaction ID (TxID)</label>
+                                    <input 
+                                      type="text"
+                                      className="w-full text-xs font-mono font-bold uppercase tracking-wider bg-white border border-slate-205 rounded-lg p-2"
+                                      placeholder="e.g. 8K90LMD2"
+                                      value={checkoutTxId}
+                                      onChange={(e) => setCheckoutTxId(e.target.value)}
+                                    />
+                                  </div>
+                                </div>
+                              ) : (
+                                <p className="text-slate-400 text-[10.5px] font-bold">No accounts configured.</p>
+                              )}
+                            </div>
+                          );
+                        })()}
+
+                        {/* Submit Button Action for Stage 2 */}
+                        <div className="flex gap-3 pt-3">
                           <button 
                             type="button"
-                            onClick={handleCheckout}
-                            className="flex-1 bg-gradient-to-r from-pink-500 to-indigo-600 text-white font-extrabold py-3 rounded-lg text-xs uppercase tracking-wider transition-all shadow active:scale-95 cursor-pointer text-center"
+                            onClick={() => {
+                              if (!checkoutPaymentMethod) {
+                                showNotif(lang === 'en' ? "Please select a payment method." : "অনুগ্রহ করে একটি কুরিয়ার পেমেন্ট মাধ্যম নির্বাচন করুন।", "error");
+                                return;
+                              }
+                              if (checkoutPaymentMethod !== 'COD' && checkoutPaymentMethod !== 'Card') {
+                                const isMobile = window.innerWidth < 768;
+                                if (!checkoutTxId.trim() || (!isMobile && !checkoutSenderNo.trim())) {
+                                  showNotif(
+                                    lang === 'en' 
+                                      ? (isMobile ? "Please provide transaction ID." : "Please provide sender mobile and transaction ID.")
+                                      : (isMobile ? "অনুগ্রহ করে ট্রানজেকশন আইডি প্রদান করুন।" : "অনুগ্রহ করে প্রেরক মোবাইল এবং ট্রানজেকশন আইডি প্রদান করুন।"), 
+                                    "error"
+                                  );
+                                  return;
+                                }
+                              }
+                              handleCheckout();
+                            }}
+                            className="flex-1 bg-gradient-to-r from-pink-500 to-indigo-600 text-white font-extrabold uppercase py-3.5 rounded-xl text-xs tracking-wider transition-all shadow-md active:scale-95 cursor-pointer text-center"
                           >
-                            Confirm Order
+                            {lang === 'en' ? 'Confirm Payment & Order' : 'পেমেন্ট ও অর্ডার কনফার্ম করুন'}
                           </button>
-                        )}
+                        </div>
                       </div>
-                    </>
-                  );
+                    );
+                  }
                 })()}
-
               </div>
             ) : (
               /* STANDARD CART VIEW (ONLY PRODUCT LIST & RECEIPT SUMMARY WITH NO GUEST ADDRESSES) */
@@ -3179,8 +3979,26 @@ export default function CustomerStore({
                           setViewingProduct(prod);
                           setShowShopPage(false);
                         }}
-                        className="bg-white hover:bg-slate-50/20 border border-slate-150 rounded-2xl p-3 cursor-pointer select-none transition-all hover:shadow-lg hover:border-pink-200 group flex flex-col justify-between"
+                        className="bg-white hover:bg-slate-50/20 border border-slate-150 rounded-2xl p-3 cursor-pointer select-none transition-all hover:shadow-lg hover:border-pink-200 group flex flex-col justify-between relative"
                       >
+                        {/* Favorite Button */}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const isFav = favorites.includes(prod.id);
+                            if (isFav) {
+                              setFavorites(prev => prev.filter(id => id !== prod.id));
+                              showNotif("Removed from Favorites", "success");
+                            } else {
+                              setFavorites(prev => [...prev, prod.id]);
+                              showNotif("Added to Favorites", "success");
+                            }
+                          }}
+                          className="absolute top-3 right-3 bg-white/95 p-1.5 rounded-full z-10 shadow-xs hover:scale-105 active:scale-95 transition-transform cursor-pointer border border-slate-100"
+                        >
+                          <Heart className={`w-3.5 h-3.5 ${favorites.includes(prod.id) ? 'fill-red-500 text-red-500' : 'text-slate-400'}`} />
+                        </button>
+
                         <div>
                           <div className="aspect-square bg-white rounded-xl flex items-center justify-center p-2 mb-2 relative overflow-hidden border border-slate-100">
                             {sPct > 0 && (
@@ -3193,6 +4011,15 @@ export default function CustomerStore({
                           <h4 className="font-extrabold text-slate-905 text-slate-900 text-xs truncate leading-snug group-hover:text-pink-500 transition-colors">
                             {prod.name}
                           </h4>
+                          
+                          {/* Rating and Reviews count */}
+                          <div className="flex items-center gap-1 mt-1">
+                            <span className="text-[10px] font-extrabold text-amber-500 flex items-center gap-0.5">
+                              ★ {prod.rating}
+                            </span>
+                            <span className="text-[9px] text-slate-400">({prod.sales})</span>
+                          </div>
+
                           <p className="text-[9.5px] text-slate-400 font-bold mt-0.5 truncate">{categories.find(c => c.id === prod.catId)?.name || 'N/A'}</p>
                         </div>
                         <div className="flex justify-between items-end mt-2.5">
@@ -3273,79 +4100,15 @@ export default function CustomerStore({
           </div>
         </main>
       ) : (
-        <main className="flex-1 max-w-7xl mx-auto w-full px-4 py-6 md:py-10 grid grid-cols-1 lg:grid-cols-4 gap-8">
-        
-        {/* Left sidebar directory layout */}
-        <div className="hidden lg:block lg:col-span-1 space-y-6">
-          <div className="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-md">
-            <div className="bg-pink-500 text-white px-5 py-4 font-black text-sm uppercase tracking-wider flex items-center gap-2">
-              <span className="p-1.5 bg-white/10 rounded-lg">
-                <Menu className="w-4 h-4 text-white" />
-              </span>
-              <span>All Categories</span>
-            </div>
-            <ul className="divide-y divide-slate-100 text-xs font-bold text-slate-700">
-              <li 
-                onClick={() => { 
-                  setShowShopPage(true); 
-                  setSelectedCat(null); 
-                  setSelectedOffer(null); 
-                  setViewingProduct(null); 
-                  setShowCustProfilePage(false);
-                  setShowCartPage(false);
-                  setShowSupportPage(false);
-                  window.scrollTo({ top: 0, behavior: "smooth" });
-                }}
-                className={`px-5 py-3.5 cursor-pointer transition-all flex items-center justify-between hover:bg-emerald-50/60 hover:text-emerald-600 ${showShopPage ? 'bg-emerald-50 text-emerald-600 font-extrabold border-l-4 border-emerald-500' : ''}`}
-              >
-                <span className="flex items-center gap-1.5 font-extrabold">
-                  <ShoppingBag className="w-4 h-4 text-emerald-540 text-emerald-500" />
-                  <span>Shop (All Products)</span>
-                </span>
-                <span className="bg-emerald-555 bg-emerald-500 text-white font-black text-[9px] px-2 py-0.5 rounded-full z-10 shadow-sm leading-none">
-                  NEW
-                </span>
-              </li>
-              <li 
-                onClick={() => { setSelectedCat(null); setSelectedOffer(null); setViewingProduct(null); setShowShopPage(false); }}
-                className={`px-5 py-3.5 cursor-pointer transition-all flex items-center justify-between hover:bg-pink-50/40 hover:text-pink-600 ${(!selectedCat && !selectedOffer && !showShopPage) ? 'bg-pink-50/50 text-pink-600 font-extrabold border-l-4 border-pink-500' : ''}`}
-              >
-                <span>All Collections</span>
-                <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-              </li>
-              {categories.map(c => (
-                <li 
-                  key={c.id}
-                  onClick={() => { setSelectedCat(c.id); setSelectedOffer(null); setViewingProduct(null); }}
-                  className={`px-5 py-3.5 cursor-pointer transition-all flex items-center justify-between hover:bg-pink-50/40 hover:text-pink-600 ${(selectedCat === c.id && !selectedOffer) ? 'bg-pink-50/50 text-pink-600 font-extrabold border-l-4 border-pink-500' : ''}`}
-                >
-                  <span className="truncate">{c.name}</span>
-                  <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          {/* Quick Reseller Board Info */}
-          <div className="bg-gradient-to-br from-indigo-900 to-indigo-950 p-5 rounded-2xl text-white shadow-xl border border-indigo-950">
-            <h4 className="font-bold text-sm tracking-wide">Earning Opportunity</h4>
-            <p className="text-xs text-indigo-200 mt-1 lines leading-relaxed">
-              Register as an Dealy Sales Partner. Sell directly to your network and withdraw profit straight to bKash!
-            </p>
-            <button 
-              onClick={openResellerLandingPage}
-              className="mt-4 w-full bg-gradient-to-r from-pink-500 to-rose-500 text-white py-2.5 rounded-xl font-bold text-xs hover:shadow-lg active:scale-95 transition-all flex items-center justify-center gap-1"
-            >
-              Join Reseller Program
-            </button>
-          </div>
-        </div>
-
-        {/* Right Workspace Main frame */}
-        <div className="lg:col-span-3">
+        <main className={`flex-1 max-w-7xl mx-auto w-full px-4 py-6 md:py-10 ${viewingProduct || selectedOffer ? 'grid grid-cols-1 lg:grid-cols-4 gap-8' : 'space-y-8'} text-slate-800`}>
           
-          <AnimatePresence mode="wait">
-            {viewingProduct ? (
+          {/* Left sidebar directory layout */}
+          {(viewingProduct || selectedOffer) && renderSidebarContent()}
+
+          {/* Right Workspace Main frame */}
+          <div className={viewingProduct || selectedOffer ? "lg:col-span-3" : "w-full"}>
+            <AnimatePresence mode="wait">
+              {viewingProduct ? (
               // === PRODUCT DETAIL INTERACTIVE PAGE ===
               <motion.div 
                 key="details"
@@ -3655,6 +4418,9 @@ export default function CustomerStore({
                 exit={{ opacity: 0 }}
                 className="space-y-8"
               >
+                <div className="grid grid-cols-1 lg:grid-cols-4 gap-8 items-start">
+                  {renderSidebarContent()}
+                  <div className="lg:col-span-3 space-y-8 animate-fade-in">
                 {/* Banner Carousel Hero */}
                 {!selectedCat && activeBanners.length > 0 && (
                   <div className={`relative overflow-hidden rounded-2xl shadow-lg border border-slate-100 aspect-[12/5] sm:aspect-auto ${bannerHeight === 'small' ? 'sm:h-[180px] md:h-[260px] lg:h-[295px]' : bannerHeight === 'large' ? 'sm:h-[260px] md:h-[390px] lg:h-[435px]' : 'sm:h-[220px] md:h-[320px] lg:h-[365px]'}`}>
@@ -3758,26 +4524,36 @@ export default function CustomerStore({
                           </button>
                         </div>
                         <span className="text-slate-300 text-[10px] font-thin">|</span>
-                        <button onClick={() => setSelectedCat(null)} className="text-pink-500 font-extrabold text-xs uppercase hover:underline cursor-pointer">All</button>
+                        <button onClick={() => {
+                          setSelectedCat(null);
+                          setSelectedOffer(null);
+                          setViewingProduct(null);
+                          setShowShopPage(true);
+                          setShowResellerLandingPage(false);
+                          setShowCustProfilePage(false);
+                          setShowOnlyFavorites(false);
+                          setShowCartPage(false);
+                          setShowSupportPage(false);
+                        }} className="text-pink-500 font-extrabold text-xs uppercase hover:underline cursor-pointer">All</button>
                       </div>
                     </div>
                     <div ref={categoriesScrollRef} className="scroll-x-container pb-2 px-1">
-                      {/* All Collections Button */}
-                      <button 
-                        onClick={() => setSelectedCat(null)} 
-                        className={`flex-shrink-0 flex flex-col items-center gap-1.5 p-2 rounded-2xl min-w-[85px] transition-all bg-white border cursor-pointer ${!selectedCat ? 'border-pink-500 bg-pink-50/40 ring-1 ring-pink-500/20 shadow-sm' : 'border-slate-200 hover:bg-slate-50'}`}
-                      >
-                        <div className="w-12 h-12 rounded-xl bg-pink-50 flex items-center justify-center text-pink-500 border border-pink-100">
-                          <Menu className="w-5 h-5" />
-                        </div>
-                        <span className="text-[10px] font-black tracking-tight text-slate-800 uppercase text-center leading-none">All Collection</span>
-                      </button>
                       {categories.map(c => {
                         const isSel = selectedCat === c.id;
                         return (
                           <button 
                             key={c.id} 
-                            onClick={() => setSelectedCat(c.id)}
+                            onClick={() => {
+                              setSelectedCat(c.id);
+                              setSelectedOffer(null);
+                              setViewingProduct(null);
+                              setShowResellerLandingPage(false);
+                              setShowShopPage(false);
+                              setShowCustProfilePage(false);
+                              setShowOnlyFavorites(false);
+                              setShowCartPage(false);
+                              setShowSupportPage(false);
+                            }}
                             className={`flex-shrink-0 flex flex-col items-center gap-1.5 p-2 rounded-2xl min-w-[95px] transition-all bg-white border cursor-pointer ${isSel ? 'border-pink-500 bg-pink-50/40 ring-1 ring-pink-500/20 shadow-sm' : 'border-slate-200 hover:bg-slate-50'}`}
                           >
                             <div className="w-12 h-12 rounded-xl overflow-hidden bg-slate-50 flex items-center justify-center p-1 border border-slate-100">
@@ -3834,14 +4610,41 @@ export default function CustomerStore({
                           <div 
                             key={prod.id}
                             onClick={() => viewDetails(prod)}
-                            className="bg-slate-50/50 hover:bg-white border border-slate-100 rounded-xl p-3 cursor-pointer select-none transition-all hover:shadow-md card-hover group"
+                            className="bg-slate-50/50 hover:bg-white border border-slate-100 rounded-xl p-3 cursor-pointer select-none transition-all hover:shadow-md card-hover group relative"
                           >
+                            {/* Favorite Button */}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const isFav = favorites.includes(prod.id);
+                                if (isFav) {
+                                  setFavorites(prev => prev.filter(id => id !== prod.id));
+                                  showNotif("Removed from Favorites", "success");
+                                } else {
+                                  setFavorites(prev => [...prev, prod.id]);
+                                  showNotif("Added to Favorites", "success");
+                                }
+                              }}
+                              className="absolute top-3 right-3 bg-white/90 p-1.2 rounded-full z-10 shadow-xs hover:scale-105 active:scale-95 transition-transform cursor-pointer border border-slate-100"
+                            >
+                              <Heart className={`w-3 h-3 ${favorites.includes(prod.id) ? 'fill-red-500 text-red-500' : 'text-slate-400'}`} />
+                            </button>
+
                             <div className="aspect-square bg-white rounded-lg flex items-center justify-center p-1 mb-2">
                               <img src={prod.img} alt={prod.name} className="max-h-full max-w-full object-contain mix-blend-multiply group-hover:scale-105 transition-transform" />
                             </div>
                             <h5 className="font-bold text-slate-800 text-[11px] truncate leading-tight group-hover:text-indigo-600 transition-colors">
                               {prod.name}
                             </h5>
+
+                            {/* Rating and Reviews count */}
+                            <div className="flex items-center gap-1 mt-0.5">
+                              <span className="text-[9px] font-extrabold text-amber-500 flex items-center gap-0.5">
+                                ★ {prod.rating}
+                              </span>
+                              <span className="text-[8px] text-slate-400">({prod.sales})</span>
+                            </div>
+
                             <div className="flex justify-between items-baseline mt-1.5">
                               <span className="text-indigo-600 font-extrabold text-[12px]">৳{prod.discountPrice}</span>
                               {prod.originalPrice > prod.discountPrice && (
@@ -3854,6 +4657,9 @@ export default function CustomerStore({
                     </div>
                   </div>
                 )}
+
+                </div>
+              </div>
 
                 {/* Primary Card Marketplace */}
                 <div id="products-header">
@@ -3875,7 +4681,7 @@ export default function CustomerStore({
                       <p className="text-xs text-slate-400 mt-1">Refine your active filters or clear search term</p>
                     </div>
                   ) : (
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-6">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 sm:gap-6">
                       {displayProducts.map(prod => {
                         const sPct = prod.originalPrice > 0 ? Math.round(((prod.originalPrice - prod.discountPrice) / prod.originalPrice) * 100) : 0;
                         return (
@@ -4082,6 +4888,7 @@ export default function CustomerStore({
             setShowOnlyFavorites(false);
             setShowCartPage(false);
             setShowSupportPage(false);
+            setShowResellerLandingPage(false);
             window.scrollTo({ top: 0, behavior: 'smooth' });
           }}
           className={`flex flex-col items-center justify-center w-14 py-1 rounded-xl transition-all cursor-pointer ${showShopPage ? 'bg-white/20 font-extrabold text-white scale-[1.05] shadow-xs' : 'opacity-85 hover:opacity-100'}`}
@@ -4146,13 +4953,15 @@ export default function CustomerStore({
               setShowOnlyFavorites(false);
               setShowCartPage(false);
               setShowSupportPage(false);
+              setShowResellerLandingPage(false);
+              setShowMyOrdersPage(false);
               window.scrollTo({ top: 0, behavior: 'smooth' });
             } else {
               setAuthType('login');
               setShowAuthModal(true);
             }
           }}
-          className={`flex flex-col items-center justify-center w-14 py-1 rounded-xl transition-all cursor-pointer ${showCustProfilePage ? 'bg-white/20 font-extrabold text-white scale-[1.05] shadow-xs' : 'opacity-85 hover:opacity-100'}`}
+          className={`flex flex-col items-center justify-center w-14 py-1 rounded-xl transition-all cursor-pointer ${(showCustProfilePage || showMyOrdersPage) ? 'bg-white/20 font-extrabold text-white scale-[1.05] shadow-xs' : 'opacity-85 hover:opacity-100'}`}
         >
           <User className="w-4.5 h-4.5" />
           <span className="text-[9.5px] font-black mt-1 uppercase tracking-tight">{loggedCustomer ? t("Me") : t("Log In")}</span>
@@ -4283,6 +5092,8 @@ export default function CustomerStore({
                         setShowOnlyFavorites(false);
                         setShowCartPage(false);
                         setShowSupportPage(false);
+                        setShowShopPage(true);
+                        setShowResellerLandingPage(false);
                         window.scrollTo({ top: 0, behavior: 'smooth' });
                       }}
                       className={`w-full text-left px-3 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-between cursor-pointer ${!selectedCat ? 'bg-pink-50/60 text-pink-600' : 'hover:bg-slate-50 text-slate-700'}`}
@@ -4302,6 +5113,8 @@ export default function CustomerStore({
                             setShowOnlyFavorites(false);
                             setShowCartPage(false);
                             setShowSupportPage(false);
+                            setShowShopPage(false);
+                            setShowResellerLandingPage(false);
                             window.scrollTo({ top: 0, behavior: 'smooth' });
                           }}
                           className={`w-full text-left px-3 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-between cursor-pointer ${selectedCat === cat.id ? 'bg-pink-50/60 text-pink-600' : 'hover:bg-slate-50 text-slate-700'}`}
@@ -4521,7 +5334,7 @@ export default function CustomerStore({
                     <input 
                       type="tel" 
                       className="form-input" 
-                      placeholder="📞 ••••••••••••" 
+                      placeholder="📞 e.g. 017XXXXXXXX (11 Digits)" 
                       required
                       value={loginData.phone}
                       onChange={(e) => setLoginData({ ...loginData, phone: e.target.value })}
@@ -4561,7 +5374,7 @@ export default function CustomerStore({
                     <input 
                       type="tel" 
                       className="form-input" 
-                      placeholder="📞 ••••••••••••" 
+                      placeholder="📞 e.g. 017XXXXXXXX (11 Digits)" 
                       required
                       value={regData.phone}
                       onChange={(e) => setRegData({ ...regData, phone: e.target.value })}
@@ -5198,6 +6011,12 @@ export default function CustomerStore({
       }
       return [...prev, { product: prod, qty: q, color: col, cartId }];
     });
-    setShowCartModal(true);
+    if (window.innerWidth < 768) {
+      setViewingProduct(null);
+      setShowCartPage(true);
+      setIsCheckingOut(true);
+    } else {
+      setShowCartModal(true);
+    }
   }
 }
