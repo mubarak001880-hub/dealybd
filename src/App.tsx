@@ -6,8 +6,8 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Bell, X, CheckCircle, AlertTriangle, ShieldCheck, HelpCircle } from 'lucide-react';
-import { User, Product, Category, Order, Banner, SellerApp, Withdrawal, Customer, SpecialOffer, DeliveryCharge, FooterConfig, PopupImage, ResellerPageConfig, ResellerSubscriptionOption, ResellerFAQ, ResellerBenefitCard, AdvanceConfig, PaymentChannel, PromoCode } from './types';
-import { initialUsers, initialProducts, initialCategories, initialBanners, initialOrders, initialSpecialOffers, initialResellerPageConfig, initialResellerSubscriptions, initialResellerBenefits, initialResellerFAQs } from './data';
+import { User, Product, Category, Order, Banner, SellerApp, Withdrawal, Customer, SpecialOffer, DeliveryCharge, FooterConfig, PopupImage, ResellerPageConfig, ResellerSubscriptionOption, ResellerFAQ, ResellerBenefitCard, AdvanceConfig, PaymentChannel, PromoCode, FlashOfferSetting } from './types';
+import { initialUsers, initialProducts, initialCategories, initialBanners, initialOrders, initialSpecialOffers, initialResellerPageConfig, initialResellerSubscriptions, initialResellerBenefits, initialResellerFAQs, initialFlashOfferSettings } from './data';
 
 import CustomerStore from './components/CustomerStore';
 import UserPanel from './components/UserPanel';
@@ -23,14 +23,20 @@ const initialDeliveryCharges: DeliveryCharge[] = [
 ];
 
 const initialFooterConfig: FooterConfig = {
-  aboutUs: "Welcome to Dealy Distribution, Bangladesh's leading standard reselling and wholesale distribution network. We provide curated, high-margin, top-tier products to help our resellers start businesses with zero investment.",
+  aboutUs: "Badhon's World - Your Trusted Hub for Unique Products & Home Décor. Delivering quality, reliability & happiness straight to your doorstep. Customer-first approach | Fast delivery | Trusted by thousands nationwide.",
   facebook: "https://facebook.com/dealydistribution",
   youtube: "https://youtube.com/dealydistribution",
+  instagram: "https://instagram.com/dealydistribution",
+  tiktok: "https://tiktok.com/@dealydistribution",
   contactEmail: "support@dealy.com",
   contactPhone: "+8801711223344",
   privacyPolicy: "We value customer trust and guarantee safe warehousing, quality checks, and real-time logistics tracking parameters, protecting your business data integrity.",
   joinResellerBanner: "Start your independent reselling journey today. Place orders, track active commission payouts, and boost family earnings with zero stock load.",
   brandLogoUrl: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&q=80",
+  address: "Dokkhin Mugda, Bazar Mosjid, Hamid Tower Dhaka, Bangladesh.",
+  websiteUrl: "https://badhonsworld.com",
+  developerName: "Mubarak",
+  developerUrl: "https://github.com",
   customLinks: [
     { name: "Official WhatsApp Support Helpline", url: "https://wa.me/8801735165971" },
     { name: "Official Telegram Channel Hub", url: "https://t.me/dealydistribution" },
@@ -255,6 +261,15 @@ export default function App() {
     }
   });
 
+  const [flashOfferSettings, setFlashOfferSettings] = useState<FlashOfferSetting[]>(() => {
+    try {
+      const saved = localStorage.getItem('orivian_v4_flash_offers');
+      return saved ? JSON.parse(saved) : initialFlashOfferSettings;
+    } catch {
+      return initialFlashOfferSettings;
+    }
+  });
+
   useEffect(() => {
     try {
       localStorage.setItem('orivian_v4_promos', JSON.stringify(promoCodes));
@@ -262,6 +277,14 @@ export default function App() {
       console.error("Storage failed:", e);
     }
   }, [promoCodes]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('orivian_v4_flash_offers', JSON.stringify(flashOfferSettings));
+    } catch (e) {
+      console.error("Storage of flash offers failed:", e);
+    }
+  }, [flashOfferSettings]);
 
 
 
@@ -578,6 +601,8 @@ export default function App() {
             setAdvanceConfig={setAdvanceConfig}
             promoCodes={promoCodes}
             setPromoCodes={setPromoCodes}
+            flashOfferSettings={flashOfferSettings}
+            setFlashOfferSettings={setFlashOfferSettings}
             onLogout={handlePanelLogout}
             showNotif={showNotif}
           />
@@ -625,6 +650,8 @@ export default function App() {
             setAdvanceConfig={setAdvanceConfig}
             promoCodes={promoCodes}
             setPromoCodes={setPromoCodes}
+            flashOfferSettings={flashOfferSettings}
+            setFlashOfferSettings={setFlashOfferSettings}
             showNotif={showNotif}
             openPanelLogin={() => setShowDirectLogin(true)}
           />

@@ -5,7 +5,7 @@ import {
   Edit, Ban, FileText, Check, X, ShieldAlert, CheckCircle, Clock, Calendar, Edit3, ArrowUpRight, ArrowDownRight, Eye, Tag,
   ShoppingBag, Upload, UserCheck, Award, HelpCircle
 } from 'lucide-react';
-import { User, Product, Category, Order, Banner, SellerApp, Withdrawal, OrderStatus, TrackingEvent, SpecialOffer, DeliveryCharge, FooterConfig, PopupImage, ResellerPageConfig, ResellerSubscriptionOption, ResellerFAQ, ResellerBenefitCard, AdvanceConfig, PaymentChannel, PromoCode } from '../types';
+import { User, Product, Category, Order, Banner, SellerApp, Withdrawal, OrderStatus, TrackingEvent, SpecialOffer, DeliveryCharge, FooterConfig, PopupImage, ResellerPageConfig, ResellerSubscriptionOption, ResellerFAQ, ResellerBenefitCard, AdvanceConfig, PaymentChannel, PromoCode, FlashOfferSetting } from '../types';
 
 interface AdminPanelProps {
   users: User[];
@@ -44,6 +44,8 @@ interface AdminPanelProps {
   setAdvanceConfig: React.Dispatch<React.SetStateAction<AdvanceConfig>>;
   promoCodes: PromoCode[];
   setPromoCodes: React.Dispatch<React.SetStateAction<PromoCode[]>>;
+  flashOfferSettings?: FlashOfferSetting[];
+  setFlashOfferSettings?: React.Dispatch<React.SetStateAction<FlashOfferSetting[]>>;
   onLogout: () => void;
   showNotif: (msg: string, type: 'success' | 'error') => void;
 }
@@ -125,10 +127,12 @@ export default function AdminPanel({
   setAdvanceConfig,
   promoCodes,
   setPromoCodes,
+  flashOfferSettings = [],
+  setFlashOfferSettings,
   onLogout,
   showNotif,
 }: AdminPanelProps) {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'products' | 'categories' | 'flash' | 'banners' | 'popup_images' | 'orders' | 'reseller_orders' | 'withdrawals' | 'users' | 'apps' | 'offers' | 'delivery_charges' | 'footer_customize' | 'reseller_page' | 'advance_payment' | 'promo_codes'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'products' | 'categories' | 'flash' | 'banners' | 'popup_images' | 'orders' | 'reseller_orders' | 'withdrawals' | 'users' | 'apps' | 'offers' | 'delivery_charges' | 'footer_customize' | 'reseller_page' | 'advance_payment' | 'promo_codes' | 'flash_offers_settings'>('dashboard');
 
   // Customer Direct Orders & Reseller Orders sub-status filters
   const [custOrderFilter, setCustOrderFilter] = useState<'all' | 'Pending' | 'Approved' | 'Processing' | 'Shipped' | 'Delivered' | 'Cancelled'>('all');
@@ -242,6 +246,44 @@ export default function AdminPanel({
         }
       };
       reader.readAsDataURL(file);
+    }
+  };
+
+  const handleProductExtraImgsUpload = (e: React.ChangeEvent<HTMLInputElement>, isEdit: boolean) => {
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      const pFiles = Array.from(files) as File[];
+      const loadedImages: string[] = [];
+      let processed = 0;
+      
+      pFiles.forEach((file: File) => {
+        const reader = new FileReader();
+        reader.onloadend = async () => {
+          const compressed = await compressImage(reader.result as string, 800, 800, 0.7);
+          loadedImages.push(compressed);
+          processed++;
+          if (processed === pFiles.length) {
+            if (isEdit && editingProduct) {
+              const currentList = editingProduct.images || [];
+              setEditingProduct({ ...editingProduct, images: [...currentList, ...loadedImages] });
+            } else {
+              const currentList = newProd.images || [];
+              setNewProd({ ...newProd, images: [...currentList, ...loadedImages] });
+            }
+          }
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+  };
+
+  const removeProductExtraImg = (index: number, isEdit: boolean) => {
+    if (isEdit && editingProduct) {
+      const list = (editingProduct.images || []).filter((_, idx) => idx !== index);
+      setEditingProduct({ ...editingProduct, images: list });
+    } else {
+      const list = (newProd.images || []).filter((_, idx) => idx !== index);
+      setNewProd({ ...newProd, images: list });
     }
   };
 
@@ -566,7 +608,7 @@ export default function AdminPanel({
       ...newProd,
       id: 'p_' + Date.now()
     };
-    setProducts(prev => [...prev, finalProd]);
+    setProducts(prev => [finalProd, ...prev]);
     setNewProd({
       catId: '', name: '', description: '', img: '', originalPrice: 0, discountPrice: 0,
       buyRate: 0, minSellRate: 0, defaultSellRate: 0, rating: 5.0, sales: 0, inStock: true, isFlash: false, colors: [],
@@ -593,7 +635,7 @@ export default function AdminPanel({
     const str = newCat.trim().toUpperCase();
     if (!str) return;
     const cat: Category = { id: 'cat_' + Date.now(), name: str };
-    setCategories(prev => [...prev, cat]);
+    setCategories(prev => [cat, ...prev]);
     setNewCat('');
     showNotif("Retail Category listed.", "success");
   };
@@ -862,6 +904,7 @@ export default function AdminPanel({
             { id: 'categories', label: 'Taxonomy Categories', icon: <Layers className="w-4 h-4" /> },
             { id: 'offers', label: 'Special Offers & Tags', icon: <Tag className="w-4 h-4" /> },
             { id: 'flash', label: 'Flash Campaign', icon: <Bolt className="w-4 h-4" /> },
+            { id: 'flash_offers_settings', label: 'Flash Sale Config Settings', icon: <Bolt className="w-4 h-4 text-amber-500 font-bold animate-pulse" /> },
             { id: 'banners', label: 'Distributor Carousel', icon: <Images className="w-4 h-4" /> },
             { id: 'popup_images', label: 'Popup Images', icon: <Images className="w-4 h-4 text-pink-400" /> },
             { id: 'orders', label: 'Customer Orders', icon: <Truck className="w-4 h-4" /> },
@@ -1016,6 +1059,35 @@ export default function AdminPanel({
                   )}
                 </div>
 
+                <div className="form-group pb-1">
+                  <label className="form-label text-indigo-700 font-bold">Extra Product Images (Optional, 5-6+ images)</label>
+                  <input 
+                    type="file" 
+                    multiple 
+                    accept="image/*" 
+                    className="form-input text-xs py-1.5 border-dashed border-indigo-300 bg-indigo-50/10 focus:bg-white" 
+                    onChange={(e) => handleProductExtraImgsUpload(e, false)} 
+                  />
+                  {newProd.images && newProd.images.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mt-2 p-2 bg-slate-50 border rounded-xl max-h-24 overflow-y-auto">
+                      {newProd.images.map((imgUrl, idx) => (
+                        <div key={idx} className="relative group w-11 h-11 border rounded bg-white flex items-center justify-center p-0.5">
+                          <img src={imgUrl} className="max-w-full max-h-full object-contain" />
+                          <button 
+                            type="button" 
+                            onClick={() => removeProductExtraImg(idx, false)}
+                            className="absolute -top-1.5 -right-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-full p-0 flex items-center justify-center font-bold"
+                            style={{ width: '15px', height: '15px', fontSize: '9px', lineHeight: '1' }}
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <p className="text-[10px] text-indigo-500 font-medium mt-1">Hold Shift/Ctrl to select 5-6 or more images together.</p>
+                </div>
+
                 <div className="form-group">
                   <label className="form-label">Color Variants (Optional)</label>
                   <div className="flex gap-2">
@@ -1097,6 +1169,37 @@ export default function AdminPanel({
                       onChange={(e) => setNewProd({ ...newProd, advanceAmount: Math.max(0, parseInt(e.target.value) || 0) })} 
                     />
                     <p className="text-[10px] text-slate-400 mt-1">Users must pay this amount as advance using bKash, Nagad, Rocket, or Bank to place order.</p>
+                  </div>
+                </div>
+
+                {/* Social Proof ratings and sales */}
+                <div className="col-span-1 md:col-span-2 bg-amber-50/50 rounded-2xl border border-amber-100/80 p-5 grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="col-span-1 md:col-span-2 pb-1 border-b border-amber-100/60 flex justify-between items-center">
+                    <span className="font-extrabold text-[10px] uppercase tracking-wider text-amber-900">Rating & Reviews (Social Proof)</span>
+                  </div>
+                  <div>
+                    <label className="form-label font-bold text-slate-700">Star Rating (0.0 - 5.0)</label>
+                    <input 
+                      type="number" 
+                      step="0.1" 
+                      min="0" 
+                      max="5"
+                      className="form-input text-xs py-2 mt-1 bg-white border" 
+                      placeholder="e.g. 4.8"
+                      value={newProd.rating} 
+                      onChange={(e) => setNewProd({ ...newProd, rating: parseFloat(e.target.value) || 0 })} 
+                    />
+                  </div>
+                  <div>
+                    <label className="form-label font-bold text-slate-700">Total Sales / Reviews Count</label>
+                    <input 
+                      type="number" 
+                      min="0"
+                      className="form-input text-xs py-2 mt-1 bg-white border" 
+                      placeholder="e.g. 150"
+                      value={newProd.sales} 
+                      onChange={(e) => setNewProd({ ...newProd, sales: parseInt(e.target.value) || 0 })} 
+                    />
                   </div>
                 </div>
 
@@ -1724,7 +1827,7 @@ export default function AdminPanel({
                             colors: colorsArr,
                             isFlash: false
                           };
-                          setProducts(prev => [...prev, newProductObj]);
+                          setProducts(prev => [newProductObj, ...prev]);
                           showNotif(`Successfully assigned ${newProductObj.name} to ${activeCampName}!`, 'success');
                           
                           // Reset form inputs
@@ -2566,7 +2669,7 @@ export default function AdminPanel({
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                   <div className="space-y-1">
                     <label className="block text-slate-500 font-bold uppercase text-[9px]">Facebook Social Link URL</label>
                     <input 
@@ -2588,6 +2691,50 @@ export default function AdminPanel({
                   </div>
 
                   <div className="space-y-1">
+                    <label className="block text-slate-500 font-bold uppercase text-[9px]">Instagram Social Link URL</label>
+                    <input 
+                      type="url"
+                      className="w-full font-bold border border-slate-200 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 text-indigo-700 text-xs"
+                      value={footerConfig.instagram || ''}
+                      onChange={(e) => setFooterConfig({ ...footerConfig, instagram: e.target.value })}
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="block text-slate-500 font-bold uppercase text-[9px]">TikTok Social Link URL</label>
+                    <input 
+                      type="url"
+                      className="w-full font-bold border border-slate-200 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 text-indigo-700 text-xs"
+                      value={footerConfig.tiktok || ''}
+                      onChange={(e) => setFooterConfig({ ...footerConfig, tiktok: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="space-y-1">
+                    <label className="block text-slate-500 font-bold uppercase text-[9px]">Physical Location / Address</label>
+                    <input 
+                      type="text"
+                      className="w-full font-bold border border-slate-200 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 text-slate-800 text-xs"
+                      value={footerConfig.address || ''}
+                      placeholder="e.g. Dokkhin Mugda, Bazar Mosjid, Hamid Tower Dhaka, Bangladesh."
+                      onChange={(e) => setFooterConfig({ ...footerConfig, address: e.target.value })}
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="block text-slate-500 font-bold uppercase text-[9px]">Shop Website link (URL)</label>
+                    <input 
+                      type="url"
+                      className="w-full font-bold border border-slate-200 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 text-indigo-700 text-xs"
+                      value={footerConfig.websiteUrl || ''}
+                      placeholder="e.g. https://badhonsworld.com"
+                      onChange={(e) => setFooterConfig({ ...footerConfig, websiteUrl: e.target.value })}
+                    />
+                  </div>
+
+                  <div className="space-y-1">
                     <label className="block text-slate-500 font-bold uppercase text-[9px] text-[#e21b70]">Header Logo/Avatar Image URL</label>
                     <input 
                       type="text"
@@ -2595,6 +2742,30 @@ export default function AdminPanel({
                       placeholder="https://..."
                       value={footerConfig.brandLogoUrl || ''}
                       onChange={(e) => setFooterConfig({ ...footerConfig, brandLogoUrl: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="block text-slate-500 font-bold uppercase text-[9px] text-indigo-600">Developed By (Developer Name)</label>
+                    <input 
+                      type="text"
+                      className="w-full font-bold border border-slate-200 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 text-slate-800 text-xs"
+                      value={footerConfig.developerName || ''}
+                      placeholder="e.g. Mubarak"
+                      onChange={(e) => setFooterConfig({ ...footerConfig, developerName: e.target.value })}
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="block text-slate-500 font-bold uppercase text-[9px] text-indigo-600">Developer Profile URL Link</label>
+                    <input 
+                      type="url"
+                      className="w-full font-bold border border-slate-200 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 text-indigo-700 text-xs"
+                      value={footerConfig.developerUrl || ''}
+                      placeholder="e.g. https://github.com/..."
+                      onChange={(e) => setFooterConfig({ ...footerConfig, developerUrl: e.target.value })}
                     />
                   </div>
 
@@ -4043,6 +4214,118 @@ export default function AdminPanel({
           </motion.div>
         )}
 
+        {activeTab === 'flash_offers_settings' && (
+          <motion.div 
+            initial={{ opacity: 0 }} 
+            animate={{ opacity: 1 }}
+            className="space-y-6 text-slate-800 animate-fade-in"
+          >
+            <div>
+              <h2 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-2">
+                <Bolt className="w-5 h-5 text-indigo-500" /> Flash Offer Global Settings (ফ্ল্যাশ অফার সেটিংস)
+              </h2>
+              <p className="text-xs text-slate-400 mt-1">Configure global product tag settings, and promotional parameters displayed instantly under shop interfaces.</p>
+            </div>
+
+            <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-3xs space-y-6">
+              <div className="border-b pb-4">
+                <span className="bg-slate-900 text-white text-[9px] font-black px-2.5 py-1 rounded-md uppercase tracking-wider">
+                  Global Rules Configuration
+                </span>
+                <p className="text-xs text-slate-450 mt-2">Activate/Deactivate, configure values and badges like Free Delivery, BOGO, or special discount percentages shown over product grids.</p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                {flashOfferSettings.map((item, index) => (
+                  <div key={item.id} className="border border-slate-200/80 rounded-2.5xl p-5 bg-slate-50/50 flex flex-col justify-between space-y-4">
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-black text-slate-900 uppercase tracking-tight">{item.name}</span>
+                        <span className={`text-[9px] font-black uppercase px-2.5 py-0.5 rounded-full ${item.isActive ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'}`}>
+                          {item.isActive ? 'Active' : 'Inactive'}
+                        </span>
+                      </div>
+                      
+                      {/* Visual preview pill */}
+                      <div className="pt-2">
+                        <div className="text-[10px] uppercase font-black tracking-wide text-slate-400 mb-1.5">Live Badge preview:</div>
+                        <span 
+                          className="inline-block px-3 py-1 text-[11px] font-black tracking-wide rounded-md uppercase shadow-4xs"
+                          style={{ backgroundColor: item.bgColor || '#e2e8f0', color: item.textColor || '#1e293b' }}
+                        >
+                          {item.value}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="space-y-3 pt-2 border-t border-slate-200/50 text-xs text-slate-800">
+                      {/* Inputs */}
+                      <div>
+                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-wider block mb-1">Badge offer text</label>
+                        <input 
+                          type="text" 
+                          value={item.value}
+                          onChange={(e) => {
+                            const updated = [...flashOfferSettings];
+                            updated[index] = { ...updated[index], value: e.target.value };
+                            if (setFlashOfferSettings) setFlashOfferSettings(updated);
+                          }}
+                          className="w-full bg-white border border-slate-250 rounded-lg p-2 text-xs font-bold text-slate-800 focus:border-indigo-400 focus:outline-none"
+                        />
+                      </div>
+
+                      {/* Color selections */}
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-[9.5px] font-bold text-slate-400 block mb-1">BG HEX Color</label>
+                          <input 
+                            type="color" 
+                            value={item.bgColor || '#000000'}
+                            onChange={(e) => {
+                              const updated = [...flashOfferSettings];
+                              updated[index] = { ...updated[index], bgColor: e.target.value };
+                              if (setFlashOfferSettings) setFlashOfferSettings(updated);
+                            }}
+                            className="w-full bg-white border rounded cursor-pointer h-7"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[9.5px] font-bold text-slate-400 block mb-1">Text HEX</label>
+                          <input 
+                            type="color" 
+                            value={item.textColor || '#ffffff'}
+                            onChange={(e) => {
+                              const updated = [...flashOfferSettings];
+                              updated[index] = { ...updated[index], textColor: e.target.value };
+                              if (setFlashOfferSettings) setFlashOfferSettings(updated);
+                            }}
+                            className="w-full bg-white border rounded cursor-pointer h-7"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Toggle Active status */}
+                      <div className="pt-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const updated = [...flashOfferSettings];
+                            updated[index] = { ...updated[index], isActive: !updated[index].isActive };
+                            if (setFlashOfferSettings) setFlashOfferSettings(updated);
+                          }}
+                          className={`w-full py-2 px-3 rounded-xl transition-all cursor-pointer font-extrabold text-[11px] uppercase text-center border ${item.isActive ? 'bg-emerald-600 border-emerald-700 text-white hover:bg-emerald-700 shadow-sm font-bold' : 'bg-slate-200 border-slate-300 text-slate-700 hover:bg-slate-255 font-bold'}`}
+                        >
+                          {item.isActive ? 'Turn Off (Deactivate)' : 'Turn On (Activate)'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </motion.div>
+        )}
+
       </main>
 
       {/* === MODALS OVERLAY DECK === */}
@@ -4304,6 +4587,35 @@ export default function AdminPanel({
                   )}
                 </div>
 
+                <div className="form-group pb-1">
+                  <label className="form-label text-indigo-700 font-bold">Extra Product Images (Optional, 5-6+ images)</label>
+                  <input 
+                    type="file" 
+                    multiple 
+                    accept="image/*" 
+                    className="form-input text-xs py-1.5 border-dashed border-indigo-300 bg-indigo-50/10 focus:bg-white" 
+                    onChange={(e) => handleProductExtraImgsUpload(e, true)} 
+                  />
+                  {editingProduct.images && editingProduct.images.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mt-2 p-2 bg-slate-50 border rounded-xl max-h-24 overflow-y-auto">
+                      {editingProduct.images.map((imgUrl, idx) => (
+                        <div key={idx} className="relative group w-11 h-11 border rounded bg-white flex items-center justify-center p-0.5">
+                          <img src={imgUrl} className="max-w-full max-h-full object-contain" />
+                          <button 
+                            type="button" 
+                            onClick={() => removeProductExtraImg(idx, true)}
+                            className="absolute -top-1.5 -right-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-full p-0 flex items-center justify-center font-bold"
+                            style={{ width: '15px', height: '15px', fontSize: '9px', lineHeight: '1' }}
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <p className="text-[10px] text-indigo-500 font-medium mt-1">Hold Shift/Ctrl to select 5-6 or more images together.</p>
+                </div>
+
                 <div className="form-group">
                   <label className="form-label">Color Variants (Optional)</label>
                   <div className="flex gap-2">
@@ -4385,6 +4697,37 @@ export default function AdminPanel({
                       onChange={(e) => setEditingProduct({ ...editingProduct, advanceAmount: Math.max(0, parseInt(e.target.value) || 0) })} 
                     />
                     <p className="text-[10px] text-slate-400 mt-1">Users must pay this amount as advance using bKash, Nagad, Rocket, or Bank to place order.</p>
+                  </div>
+                </div>
+
+                {/* Social Proof ratings and sales */}
+                <div className="col-span-1 md:col-span-2 bg-amber-50/50 rounded-2xl border border-amber-100/80 p-5 grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="col-span-1 md:col-span-2 pb-1 border-b border-amber-100/60 flex justify-between items-center">
+                    <span className="font-extrabold text-[10px] uppercase tracking-wider text-amber-900">Rating & Reviews (Social Proof)</span>
+                  </div>
+                  <div>
+                    <label className="form-label font-bold text-slate-700">Star Rating (0.0 - 5.0)</label>
+                    <input 
+                      type="number" 
+                      step="0.1" 
+                      min="0" 
+                      max="5"
+                      className="form-input text-xs py-2 mt-1 bg-white border" 
+                      placeholder="e.g. 4.8"
+                      value={editingProduct.rating} 
+                      onChange={(e) => setEditingProduct({ ...editingProduct, rating: parseFloat(e.target.value) || 0 })} 
+                    />
+                  </div>
+                  <div>
+                    <label className="form-label font-bold text-slate-700">Total Sales / Reviews Count</label>
+                    <input 
+                      type="number" 
+                      min="0"
+                      className="form-input text-xs py-2 mt-1 bg-white border" 
+                      placeholder="e.g. 150"
+                      value={editingProduct.sales} 
+                      onChange={(e) => setEditingProduct({ ...editingProduct, sales: parseInt(e.target.value) || 0 })} 
+                    />
                   </div>
                 </div>
 

@@ -1,4 +1,4 @@
-import { Product, Category, User, Banner, Order, SpecialOffer, ResellerPageConfig, ResellerSubscriptionOption, ResellerFAQ, ResellerBenefitCard } from './types';
+import { Product, Category, User, Banner, Order, SpecialOffer, ResellerPageConfig, ResellerSubscriptionOption, ResellerFAQ, ResellerBenefitCard, FlashOfferSetting } from './types';
 
 
 export const initialCategories: Category[] = [
@@ -447,4 +447,35 @@ export const initialResellerFAQs: ResellerFAQ[] = [
     answer: 'আপনার অ্যাকাউন্ট ব্যালেন্স থেকে বিকাশ, রকেট বা যেকোনো পেমেন্ট মেথড সিলেক্ট করে উইথড্রয়াল রিকোয়েস্ট পাঠাতে পারবেন।'
   }
 ];
+
+export const initialFlashOfferSettings: FlashOfferSetting[] = [
+  {
+    id: 'f_disc',
+    name: 'Flash Discount Banner',
+    type: 'discount',
+    value: '-23% OFF',
+    isActive: true,
+    textColor: '#1a1a1a',
+    bgColor: '#fbbf24'
+  },
+  {
+    id: 'f_deliv',
+    name: 'Free Delivery Tag',
+    type: 'free_delivery',
+    value: 'FREE DELIVERY',
+    isActive: true,
+    textColor: '#ffffff',
+    bgColor: '#10b981'
+  },
+  {
+    id: 'f_bogo',
+    name: 'Buy One Get One Deal',
+    type: 'bogo',
+    value: 'BOGO (Buy 1 Get 1)',
+    isActive: false,
+    textColor: '#ffffff',
+    bgColor: '#ec4899'
+  }
+];
+
 

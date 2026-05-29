@@ -16,6 +16,7 @@ export interface Product {
   colors?: string[];
   requireAdvance?: boolean;
   advanceAmount?: number;
+  images?: string[];
 }
 
 export interface Category {
@@ -144,11 +145,17 @@ export interface FooterConfig {
   aboutUs: string;
   facebook: string;
   youtube: string;
+  instagram?: string;
+  tiktok?: string;
   contactEmail: string;
   contactPhone: string;
   privacyPolicy: string;
   joinResellerBanner: string;
   brandLogoUrl: string;
+  address?: string;
+  websiteUrl?: string;
+  developerName?: string;
+  developerUrl?: string;
   customLinks?: { name: string; url: string }[];
 }
 
@@ -219,6 +226,17 @@ export interface PromoCode {
   usedCount: number; // How many times it has been used currently
   isActive: boolean; // Is active or paused
 }
+
+export interface FlashOfferSetting {
+  id: string;
+  name: string;
+  type: 'discount' | 'free_delivery' | 'bogo' | 'custom';
+  value: string;
+  isActive: boolean;
+  textColor?: string;
+  bgColor?: string;
+}
+
 
 
 
