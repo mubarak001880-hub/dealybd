@@ -17,14 +17,18 @@ export interface Product {
   requireAdvance?: boolean;
   advanceAmount?: number;
   images?: string[];
+  sellerId?: string;                 // Multi-vendor seller reference
+  sellerName?: string;               // Multi-vendor seller name
+  approvalStatus?: 'pending' | 'approved' | 'rejected'; // For product reviews
 }
 
 export interface Category {
   id: string;
   name: string;
+  image?: string;
 }
 
-export type OrderStatus = 'Pending' | 'Approved' | 'Processing' | 'Shipped' | 'Delivered' | 'Cancelled';
+export type OrderStatus = 'Pending' | 'Approved' | 'Processing' | 'Shipped' | 'Delivered' | 'Cancelled' | 'Returned';
 
 export interface TrackingEvent {
   status: OrderStatus;
@@ -55,6 +59,14 @@ export interface Order {
   advancePaid?: number;
   txId?: string;
   paymentMethod?: string; // e.g. 'bKash' | 'Nagad' | 'Rocket' | 'Bank' | 'COD'
+  productId?: string;
+  sellerId?: string;
+  sellerName?: string;
+  originalPrice?: number;
+  promoDiscountApplied?: number;
+  promoCodeUsed?: string;
+  affiliateDiscountApplied?: number;
+  shippingChargeApplied?: number;
 }
 
 export interface KYCData {
@@ -80,14 +92,44 @@ export interface User {
   id: string;
   name: string;
   email: string;
+  phone?: string;
   pass: string; // Simulating hashed password
-  role: 'admin' | 'user';
+  role: 'admin' | 'user' | 'seller';
   idCode: string; // e.g. RES-1023
   banned: boolean;
   balance: number;
   kyc: KYCData;
   activities: ActivityLog[];
   avatarUrl?: string;
+  referredBy?: string; // idCode of referring reseller user
+  subscriptionExpiresAt?: string; // ISO date string e.g. "2026-12-15"
+  status?: 'approved' | 'pending' | 'rejected'; // 'pending' for wait-listed resellers
+  address?: string;
+  businessName?: string;
+  businessPageLink?: string;
+  profileUrl?: string;
+  sellerMessage?: string;
+  sellerRegPayment?: {
+    method: string;
+    senderPhone: string;
+    trxId: string;
+    amount: number;
+    submittedAt: string;
+  };
+  pendingSubscription?: {
+    packageId: string;
+    packageName: string;
+    price: string;
+    duration: string;
+    paymentMethod: string;
+    trxId: string;
+    date: string;
+  };
+  sellerRating?: number;
+  sellerFollowersCount?: string;
+  sellerShipOnTime?: number;
+  sellerChatResponse?: number;
+  sellerFollowersList?: string[];
 }
 
 export interface Customer {
@@ -113,6 +155,7 @@ export interface SellerApp {
   details?: string;
   status: 'pending' | 'approved' | 'rejected';
   date: string;
+  referredByCode?: string; // Optional code entered during submission
 }
 
 export interface Withdrawal {
@@ -157,6 +200,14 @@ export interface FooterConfig {
   developerName?: string;
   developerUrl?: string;
   customLinks?: { name: string; url: string }[];
+  privacyPolicyFullText?: string;
+  termsConditionsFullText?: string;
+  sellerPayEnabled?: boolean;
+  sellerPayAmount?: number;
+  sellerPayValidity?: string;
+  sellerPayNumberBKash?: string;
+  sellerPayNumberNagad?: string;
+  sellerPayNumberRocket?: string;
 }
 
 export interface PopupImage {
@@ -236,6 +287,63 @@ export interface FlashOfferSetting {
   textColor?: string;
   bgColor?: string;
 }
+
+export interface AffiliateTask {
+  id: string;
+  title: string;
+  desc: string;
+  reward: number;
+  status: 'active' | 'inactive';
+  platform: 'Facebook' | 'YouTube' | 'Telegram' | 'TikTok' | 'Google' | 'Custom';
+  requiredProofType?: 'link' | 'screenshot' | 'both';
+}
+
+export interface AffiliateSubmission {
+  id: string;
+  taskId: string;
+  taskTitle: string;
+  userPhone: string;
+  userName: string;
+  proof: string;
+  submissionLink?: string;
+  submissionScreenshot?: string;
+  reward: number;
+  status: 'pending' | 'approved' | 'rejected';
+  date: string;
+}
+
+export interface AffiliateClickLog {
+  ip: string;
+  date: string;
+  reward: number;
+}
+
+export interface AffiliateWithdrawal {
+  id: string;
+  amount: number;
+  method: string;
+  accountNo: string;
+  status: 'pending' | 'approved' | 'rejected';
+  date: string;
+}
+
+export interface TeamMember {
+  name: string;
+  phone: string;
+  joinedDate: string;
+}
+
+export interface AffiliateAccount {
+  phone: string;
+  name: string;
+  password: string;
+  balance: number;
+  clicksCount: number;
+  clicksList: AffiliateClickLog[];
+  withdrawals: AffiliateWithdrawal[];
+  team?: TeamMember[];
+}
+
 
 
 

@@ -2,10 +2,13 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   BarChart3, Box, Layers, Bolt, Images, Truck, DollarSign, Users, ShieldCheck, LogOut, Plus, Trash2, 
-  Edit, Ban, FileText, Check, X, ShieldAlert, CheckCircle, Clock, Calendar, Edit3, ArrowUpRight, ArrowDownRight, Eye, Tag,
+  Edit, Ban, FileText, Check, X, ShieldAlert, CheckCircle, Clock, Calendar, Edit3, ArrowUpRight, ArrowDownRight, Eye, EyeOff, Tag,
   ShoppingBag, Upload, UserCheck, Award, HelpCircle
 } from 'lucide-react';
-import { User, Product, Category, Order, Banner, SellerApp, Withdrawal, OrderStatus, TrackingEvent, SpecialOffer, DeliveryCharge, FooterConfig, PopupImage, ResellerPageConfig, ResellerSubscriptionOption, ResellerFAQ, ResellerBenefitCard, AdvanceConfig, PaymentChannel, PromoCode, FlashOfferSetting } from '../types';
+import { TinyInvoiceDetails } from './TinyInvoiceDetails';
+import { User, Product, Category, Order, Banner, SellerApp, Withdrawal, OrderStatus, TrackingEvent, SpecialOffer, DeliveryCharge, FooterConfig, PopupImage, ResellerPageConfig, ResellerSubscriptionOption, ResellerFAQ, ResellerBenefitCard, AdvanceConfig, PaymentChannel, PromoCode, FlashOfferSetting, AffiliateTask, AffiliateSubmission, AffiliateAccount } from '../types';
+import { formatResellerId, formatSellerId } from '../idUtils';
+import { getDhakaDate, formatToDhakaTime, formatToDhakaDateOnly } from '../dateUtils';
 
 interface AdminPanelProps {
   users: User[];
@@ -18,6 +21,8 @@ interface AdminPanelProps {
   setOrders: React.Dispatch<React.SetStateAction<Order[]>>;
   banners: Banner[];
   setBanners: React.Dispatch<React.SetStateAction<Banner[]>>;
+  resellerBanners?: Banner[];
+  setResellerBanners?: React.Dispatch<React.SetStateAction<Banner[]>>;
   popupImages?: PopupImage[];
   setPopupImages?: React.Dispatch<React.SetStateAction<PopupImage[]>>;
   bannerHeight: string;
@@ -48,9 +53,72 @@ interface AdminPanelProps {
   setFlashOfferSettings?: React.Dispatch<React.SetStateAction<FlashOfferSetting[]>>;
   onLogout: () => void;
   showNotif: (msg: string, type: 'success' | 'error') => void;
+
+  affiliateRatePerClick: number;
+  setAffiliateRatePerClick: React.Dispatch<React.SetStateAction<number>>;
+  affiliateMinWithdrawal: number;
+  setAffiliateMinWithdrawal: React.Dispatch<React.SetStateAction<number>>;
+  affiliateTasks: AffiliateTask[];
+  setAffiliateTasks: React.Dispatch<React.SetStateAction<AffiliateTask[]>>;
+  affiliateSubmissions: AffiliateSubmission[];
+  setAffiliateSubmissions: React.Dispatch<React.SetStateAction<AffiliateSubmission[]>>;
+  affiliateAccounts: AffiliateAccount[];
+  setAffiliateAccounts: React.Dispatch<React.SetStateAction<AffiliateAccount[]>>;
+  resellerReferralReward?: number;
+  setResellerReferralReward?: React.Dispatch<React.SetStateAction<number>>;
 }
 
-const compressImage = (base64Str: string, maxWidth = 1024, maxHeight = 1024, quality = 0.65): Promise<string> => {
+// Helper to calculate countdown for subscription
+function getSubscriptionCountdown(expiresAt?: string): string {
+  if (!expiresAt) {
+    return "No active subscription";
+  }
+  const expiryDate = getDhakaDate(expiresAt);
+  const now = getDhakaDate(new Date());
+  
+  const expiryStartOfDay = new Date(expiryDate.getFullYear(), expiryDate.getMonth(), expiryDate.getDate());
+  const nowStartOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+  if (expiryStartOfDay.getTime() < nowStartOfDay.getTime()) {
+    return "Expired";
+  }
+
+  if (expiryStartOfDay.getTime() === nowStartOfDay.getTime()) {
+    return "Expires today";
+  }
+
+  let yearDiff = expiryStartOfDay.getFullYear() - nowStartOfDay.getFullYear();
+  let monthDiff = expiryStartOfDay.getMonth() - nowStartOfDay.getMonth();
+  let dayDiff = expiryStartOfDay.getDate() - nowStartOfDay.getDate();
+
+  if (dayDiff < 0) {
+    const prevMonth = new Date(expiryStartOfDay.getFullYear(), expiryStartOfDay.getMonth(), 0);
+    dayDiff += prevMonth.getDate();
+    monthDiff--;
+  }
+
+  if (monthDiff < 0) {
+    monthDiff += 12;
+    yearDiff--;
+  }
+
+  const totalMonths = yearDiff * 12 + monthDiff;
+
+  const parts: string[] = [];
+  if (totalMonths > 0) {
+    parts.push(`${totalMonths} ${totalMonths === 1 ? 'month' : 'months'}`);
+  }
+  if (dayDiff > 0) {
+    parts.push(`${dayDiff} ${dayDiff === 1 ? 'day' : 'days'}`);
+  }
+
+  if (parts.length === 0) {
+    return "Expires today";
+  }
+  return parts.join(' ');
+}
+
+const compressImage = (base64Str: string, maxWidth = 1024, maxHeight = 1024, quality = 0.65, keepTransparency = false): Promise<string> => {
   return new Promise((resolve) => {
     const img = new Image();
     img.crossOrigin = "anonymous";
@@ -75,10 +143,16 @@ const compressImage = (base64Str: string, maxWidth = 1024, maxHeight = 1024, qua
       canvas.height = height;
       const ctx = canvas.getContext('2d');
       if (ctx) {
-        ctx.fillStyle = '#FFFFFF';
-        ctx.fillRect(0, 0, width, height);
-        ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', quality));
+        if (!keepTransparency) {
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillRect(0, 0, width, height);
+          ctx.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL('image/jpeg', quality));
+        } else {
+          // Preserve transparency and use png format
+          ctx.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL('image/png'));
+        }
       } else {
         resolve(base64Str);
       }
@@ -101,6 +175,8 @@ export default function AdminPanel({
   setOrders,
   banners,
   setBanners,
+  resellerBanners = [],
+  setResellerBanners,
   popupImages = [],
   setPopupImages,
   bannerHeight,
@@ -131,12 +207,27 @@ export default function AdminPanel({
   setFlashOfferSettings,
   onLogout,
   showNotif,
+  affiliateRatePerClick,
+  setAffiliateRatePerClick,
+  affiliateMinWithdrawal,
+  setAffiliateMinWithdrawal,
+  affiliateTasks,
+  setAffiliateTasks,
+  affiliateSubmissions,
+  setAffiliateSubmissions,
+  affiliateAccounts,
+  setAffiliateAccounts,
+  resellerReferralReward = 100,
+  setResellerReferralReward
 }: AdminPanelProps) {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'products' | 'categories' | 'flash' | 'banners' | 'popup_images' | 'orders' | 'reseller_orders' | 'withdrawals' | 'users' | 'apps' | 'offers' | 'delivery_charges' | 'footer_customize' | 'reseller_page' | 'advance_payment' | 'promo_codes' | 'flash_offers_settings'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'products' | 'categories' | 'flash' | 'banners' | 'popup_images' | 'orders' | 'reseller_orders' | 'withdrawals' | 'users' | 'apps' | 'offers' | 'delivery_charges' | 'footer_customize' | 'reseller_page' | 'advance_payment' | 'promo_codes' | 'flash_offers_settings' | 'affiliate' | 'manage_sellers' | 'seller_product_reviews' | 'seller_orders'>('dashboard');
+  const [bannerSubTab, setBannerSubTab] = useState<'customer' | 'reseller'>('customer');
 
   // Customer Direct Orders & Reseller Orders sub-status filters
-  const [custOrderFilter, setCustOrderFilter] = useState<'all' | 'Pending' | 'Approved' | 'Processing' | 'Shipped' | 'Delivered' | 'Cancelled'>('all');
-  const [resellerOrderFilter, setResellerOrderFilter] = useState<'all' | 'Pending' | 'Approved' | 'Processing' | 'Shipped' | 'Delivered' | 'Cancelled'>('all');
+  const [custOrderFilter, setCustOrderFilter] = useState<'all' | 'Pending' | 'Approved' | 'Processing' | 'Shipped' | 'Delivered' | 'Cancelled' | 'Returned'>('all');
+  const [resellerOrderFilter, setResellerOrderFilter] = useState<'all' | 'Pending' | 'Approved' | 'Processing' | 'Shipped' | 'Delivered' | 'Cancelled' | 'Returned'>('all');
+  const [sellerOrderFilter, setSellerOrderFilter] = useState<'all' | 'Pending' | 'Approved' | 'Processing' | 'Shipped' | 'Delivered' | 'Cancelled' | 'Returned'>('all');
+  const [resellerFilter, setResellerFilter] = useState<'all' | 'approved' | 'pending' | 'verified' | 'unverified'>('all');
   const [adminOrderToCancel, setAdminOrderToCancel] = useState<string | null>(null);
 
   // Creation State managers
@@ -146,8 +237,18 @@ export default function AdminPanel({
     requireAdvance: false, advanceAmount: 0
   });
   const [newCat, setNewCat] = useState('');
+  const [newCatImg, setNewCatImg] = useState('');
   const [newUser, setNewUser] = useState({ name: '', email: '', pass: '' });
+  const [showNewUserPass, setShowNewUserPass] = useState(false);
   const [colorTag, setColorTag] = useState('');
+
+  // Affiliate task creation/editing states
+  const [affTaskTitle, setAffTaskTitle] = useState('');
+  const [affTaskDesc, setAffTaskDesc] = useState('');
+  const [affTaskReward, setAffTaskReward] = useState<number>(10);
+  const [affTaskPlatform, setAffTaskPlatform] = useState<'Facebook' | 'YouTube' | 'Telegram' | 'TikTok' | 'Google' | 'Custom'>('Facebook');
+  const [editingAffTaskId, setEditingAffTaskId] = useState<string | null>(null);
+  const [affTaskProofType, setAffTaskProofType] = useState<'link' | 'screenshot' | 'both'>('both');
 
   // Special Offer creation states
   const [offerTitle, setOfferTitle] = useState('');
@@ -162,6 +263,20 @@ export default function AdminPanel({
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [viewingUserKyc, setViewingUserKyc] = useState<User | null>(null);
+  const [editingSellerForStats, setEditingSellerForStats] = useState<User | null>(null);
+  const [editSellerRating, setEditSellerRating] = useState<number>(92);
+  const [editSellerFollowers, setEditSellerFollowers] = useState<string>('2.5k');
+  const [editSellerShipOnTime, setEditSellerShipOnTime] = useState<number>(95);
+  const [editSellerChatResponse, setEditSellerChatResponse] = useState<number>(90);
+
+  // Seller registration payment configuration states
+  const [sellPayOn, setSellPayOn] = useState(footerConfig.sellerPayEnabled ?? false);
+  const [sellPayAmt, setSellPayAmt] = useState(footerConfig.sellerPayAmount ?? 500);
+  const [sellPayTerm, setSellPayTerm] = useState(footerConfig.sellerPayValidity ?? "১ বছর");
+  const [sellPayBKash, setSellPayBKash] = useState(footerConfig.sellerPayNumberBKash ?? "");
+  const [sellPayNagad, setSellPayNagad] = useState(footerConfig.sellerPayNumberNagad ?? "");
+  const [sellPayRocket, setSellPayRocket] = useState(footerConfig.sellerPayNumberRocket ?? "");
+  const [expandedSellerId, setExpandedSellerId] = useState<string | null>(null);
 
   // Active Logistics Tracking Stage manager state
   const [selectedOrderForTracking, setSelectedOrderForTracking] = useState<Order | null>(null);
@@ -173,7 +288,7 @@ export default function AdminPanel({
   const [showKycRejectInput, setShowKycRejectInput] = useState(false);
 
   // Dynamic Reseller Customizer States
-  const [resellerSubTab, setResellerSubTab] = useState<'content' | 'subscriptions' | 'faqs' | 'benefits'>('content');
+  const [resellerSubTab, setResellerSubTab] = useState<'content' | 'subscriptions' | 'faqs' | 'benefits' | 'referrals'>('content');
 
   // Subscription Sub-tab States
   const [editingSubId, setEditingSubId] = useState<string | null>(null);
@@ -232,6 +347,30 @@ export default function AdminPanel({
   const platformRevenue = orders.reduce((s, o) => s + o.amount, 0);
   const platformResellProfits = orders.reduce((s, o) => s + (o.profit || 0), 0);
   const activeResellersCount = users.filter(u => u.role === 'user').length;
+
+  const handleCategoryImgUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = async () => {
+        const compressed = await compressImage(reader.result as string, 400, 400, 0.7);
+        setNewCatImg(compressed);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleEditCategoryImgUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && editingCategory) {
+      const reader = new FileReader();
+      reader.onloadend = async () => {
+        const compressed = await compressImage(reader.result as string, 400, 400, 0.7);
+        setEditingCategory({ ...editingCategory, image: compressed });
+      };
+      reader.readAsDataURL(file);
+    }
+  };
 
   const handleProductImgUpload = (e: React.ChangeEvent<HTMLInputElement>, isEdit: boolean) => {
     const file = e.target.files?.[0];
@@ -313,6 +452,24 @@ export default function AdminPanel({
         };
         setBanners(prev => [...prev, newBan]);
         showNotif("E-commerce carousel banner added.", "success");
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleResellerBannerImgUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && setResellerBanners) {
+      const reader = new FileReader();
+      reader.onloadend = async () => {
+        const compressed = await compressImage(reader.result as string, 1200, 500, 0.65);
+        const newBan: Banner = {
+          id: 'rb_' + Date.now(),
+          img: compressed,
+          isActive: true
+        };
+        setResellerBanners(prev => [...prev, newBan]);
+        showNotif("Reseller marketing banner added successfully.", "success");
       };
       reader.readAsDataURL(file);
     }
@@ -634,16 +791,17 @@ export default function AdminPanel({
     e.preventDefault();
     const str = newCat.trim().toUpperCase();
     if (!str) return;
-    const cat: Category = { id: 'cat_' + Date.now(), name: str };
+    const cat: Category = { id: 'cat_' + Date.now(), name: str, image: newCatImg || undefined };
     setCategories(prev => [cat, ...prev]);
     setNewCat('');
+    setNewCatImg('');
     showNotif("Retail Category listed.", "success");
   };
 
   const updateCategory = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingCategory) return;
-    setCategories(prev => prev.map(c => c.id === editingCategory.id ? { ...c, name: editingCategory.name.toUpperCase() } : c));
+    setCategories(prev => prev.map(c => c.id === editingCategory.id ? { ...c, name: editingCategory.name.toUpperCase(), image: editingCategory.image } : c));
     setEditingCategory(null);
     showNotif("Category altered successfully.", "success");
   };
@@ -665,11 +823,12 @@ export default function AdminPanel({
       email: newUser.email,
       pass: newUser.pass,
       role: 'user',
-      idCode: 'RES-' + Math.floor(1000 + Math.random() * 9000),
+      idCode: '#' + String(users.filter(u => u.role === 'user').length + 1).padStart(3, '0'),
       banned: false,
       balance: 0,
       kyc: { status: 'unverified' },
-      activities: []
+      activities: [],
+      status: 'approved'
     };
     setUsers(prev => [...prev, reseller]);
     setNewUser({ name: '', email: '', pass: '' });
@@ -706,7 +865,7 @@ export default function AdminPanel({
 
     const oId = selectedOrderForTracking.id;
     const notesInput = trackingNote.trim() || `Milestone reached: ${trackingStage}`;
-    const timestampStr = new Date().toLocaleString();
+    const timestampStr = formatToDhakaTime();
 
     // Map timeline updates up to the selected stage
     const updatedOrders = orders.map((o) => {
@@ -714,7 +873,7 @@ export default function AdminPanel({
 
       const newTimeline: TrackingEvent[] = o.timeline.map((event) => {
         // Mark previous and current selected events as completed
-        const stagesSeq: OrderStatus[] = ['Pending', 'Approved', 'Processing', 'Shipped', 'Delivered'];
+        const stagesSeq: OrderStatus[] = ['Pending', 'Approved', 'Processing', 'Shipped', 'Delivered', 'Cancelled', 'Returned'];
         const selectedIdx = stagesSeq.indexOf(trackingStage);
         const thisIdx = stagesSeq.indexOf(event.status);
 
@@ -786,13 +945,26 @@ export default function AdminPanel({
           status: 'Cancelled',
           timeline: [
             ...o.timeline,
-            { status: 'Cancelled', date: new Date().toLocaleString(), description: 'Order cancelled by Admin.', isCompleted: true }
+            { status: 'Cancelled', date: formatToDhakaTime(), description: 'Order cancelled by Admin.', isCompleted: true }
           ]
         };
       }
       return o;
     }));
     showNotif("Order cancelled successfully.", "success");
+  };
+
+  const handleSaveSellerPayConfig = () => {
+    setFooterConfig((prev) => ({
+      ...prev,
+      sellerPayEnabled: sellPayOn,
+      sellerPayAmount: Number(sellPayAmt),
+      sellerPayValidity: sellPayTerm,
+      sellerPayNumberBKash: sellPayBKash,
+      sellerPayNumberNagad: sellPayNagad,
+      sellerPayNumberRocket: sellPayRocket
+    }));
+    showNotif("Merchant onboarding payment configuration updated successfully!", "success");
   };
 
   // Withdrawals Action Hub
@@ -814,7 +986,7 @@ export default function AdminPanel({
           activities: [
             {
               id: 'act_' + Date.now(),
-              date: new Date().toLocaleString(),
+              date: formatToDhakaTime(),
               type: 'profit', // Treated as credit adjust
               desc: `Payout extraction rejected. ৳${wd.amount} returned to cleared ledger.`,
               amount: wd.amount
@@ -838,6 +1010,56 @@ export default function AdminPanel({
     } : u));
     setViewingUserKyc(null);
     showNotif("Partner Identity Verification (KYC) approved.", "success");
+  };
+
+  const approveResellerSubscription = (userId: string) => {
+    setUsers(prev => prev.map(u => {
+      if (u.id === userId) {
+        let expiryDate = '';
+        const dur = u.pendingSubscription?.duration || '1 YEAR';
+        const now = getDhakaDate(new Date());
+        const normalized = dur.trim().toUpperCase();
+        const match = normalized.match(/^(\d+)\s*(YEAR|YEARS|MONTH|MONTHS|DAY|DAYS)$/);
+        
+        if (match) {
+          const val = parseInt(match[1], 10);
+          const unit = match[2];
+          if (unit.startsWith('YEAR')) {
+            now.setFullYear(now.getFullYear() + val);
+          } else if (unit.startsWith('MONTH')) {
+            now.setMonth(now.getMonth() + val);
+          } else if (unit.startsWith('DAY')) {
+            now.setDate(now.getDate() + val);
+          }
+        } else {
+          now.setFullYear(now.getFullYear() + 1);
+        }
+        
+        const y = now.getFullYear();
+        const m = String(now.getMonth() + 1).padStart(2, '0');
+        const d = String(now.getDate()).padStart(2, '0');
+        expiryDate = `${y}-${m}-${d}`;
+
+        const updatedActivities = [
+          {
+            id: `act_${Date.now()}`,
+            title: 'Subscription Activated',
+            desc: `Subscription activated by admin for ${u.pendingSubscription?.packageName || 'Plan'}. Validity till ${expiryDate}.`,
+            date: formatToDhakaDateOnly()
+          },
+          ...(u.activities || [])
+        ];
+
+        return {
+          ...u,
+          status: 'approved',
+          subscriptionExpiresAt: expiryDate,
+          activities: updatedActivities
+        } as User;
+      }
+      return u;
+    }));
+    showNotif("Reseller account approved and subscription activated starting today!", "success");
   };
 
   const rejectKyc = (userId: string) => {
@@ -867,31 +1089,88 @@ export default function AdminPanel({
     const app = sellerApps.find(a => a.id === appId);
     if (!app) return;
 
-    // Add as new User
-    const rCode = 'RES-' + Math.floor(1000 + Math.random() * 9000);
+    const rCode = '#' + String(users.filter(u => u.role === 'user').length + 1).padStart(3, '0');
+    let updatedUsersList = [...users];
+    let debugMessage = `Partner application approved! Logged code is: ${rCode}`;
+    const parentCode = app.referredByCode ? app.referredByCode.trim().toUpperCase() : '';
+    let foundParentId: string | null = null;
+
+    if (parentCode) {
+      const parentUserIndex = updatedUsersList.findIndex(u => 
+        u.idCode.toUpperCase() === parentCode || 
+        (u.phone && u.phone === parentCode)
+      );
+
+      if (parentUserIndex !== -1) {
+        const parentUser = updatedUsersList[parentUserIndex];
+        foundParentId = parentUser.idCode;
+        const rewardAmount = resellerReferralReward ?? 100;
+        const newAct = {
+          id: 'act_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+          date: formatToDhakaDateOnly(),
+          type: 'profit' as const,
+          desc: `Referral Commission for approved reseller (${app.name})`,
+          amount: rewardAmount
+        };
+
+        updatedUsersList[parentUserIndex] = {
+          ...parentUser,
+          balance: parentUser.balance + rewardAmount,
+          activities: [newAct, ...(parentUser.activities || [])]
+        };
+
+        debugMessage += ` | Payout of ৳${rewardAmount} credited to ${parentUser.name} (${parentUser.idCode})`;
+      }
+    }
+
     const mockReseller: User = {
       id: 'u_' + Date.now(),
       name: app.name,
+      phone: app.phone,
       email: `${app.phone}@dealy.com`, // Quick placeholder email
       pass: '123',
       role: 'user',
       idCode: rCode,
+      referredBy: foundParentId || undefined,
       banned: false,
       balance: 0,
       kyc: { status: 'unverified' },
       activities: []
     };
 
-    setUsers(prev => [...prev, mockReseller]);
+    setUsers([...updatedUsersList, mockReseller]);
     setSellerApps(prev => prev.filter(a => a.id !== appId));
-    showNotif(`Partner application approved! Logged code is: ${rCode}`, "success");
+    showNotif(debugMessage, "success");
+  };
+
+  const getPendingCount = (tabId: string) => {
+    switch (tabId) {
+      case 'orders':
+        return orders.filter(o => o.type !== 'reseller' && o.status === 'Pending').length;
+      case 'reseller_orders':
+        return orders.filter(o => o.type === 'reseller' && o.status === 'Pending').length;
+      case 'withdrawals':
+        return withdrawals.filter(w => w.status === 'pending').length;
+      case 'apps':
+        return sellerApps.length;
+      case 'affiliate':
+        return affiliateSubmissions.filter(s => s.status === 'pending').length;
+      case 'users':
+        return users.filter(u => u.kyc?.status === 'pending').length;
+      case 'seller_product_reviews':
+        return products.filter(p => p.approvalStatus === 'pending').length;
+      case 'seller_orders':
+        return orders.filter(o => o.sellerId && o.status === 'Pending').length;
+      default:
+        return 0;
+    }
   };
 
   return (
     <div className="flex h-screen bg-slate-100 font-sans text-slate-800">
       
       {/* SIDEBAR CONTAINER */}
-      <aside className="w-72 bg-slate-900 text-white flex flex-col z-10 shadow-xl overflow-y-auto">
+      <aside className="w-72 bg-slate-900 text-white flex flex-col z-10 shadow-xl overflow-y-auto w-full max-w-[280px]">
         <div className="p-6 border-b border-slate-800 bg-slate-950 flex items-center gap-3">
           <div className="w-9 h-9 bg-pink-500 rounded-lg flex items-center justify-center font-black">DL</div>
           <span className="font-extrabold text-lg flex flex-col leading-none">DEALY <span className="text-[10px] uppercase font-bold text-slate-400 mt-1 tracking-widest">Global Admin</span></span>
@@ -916,17 +1195,31 @@ export default function AdminPanel({
             { id: 'withdrawals', label: 'ledger Withdrawals', icon: <DollarSign className="w-4 h-4" /> },
             { id: 'users', label: 'Registered Resellers', icon: <Users className="w-4 h-4" /> },
             { id: 'apps', label: 'Partner Applications', icon: <ShieldCheck className="w-4 h-4" /> },
+            { id: 'manage_sellers', label: 'Manage Sellers', icon: <Users className="w-4 h-4 text-pink-400 font-bold" /> },
+            { id: 'seller_product_reviews', label: 'Seller Products Review', icon: <ShieldCheck className="w-4 h-4 text-amber-500 animate-pulse font-bold" /> },
+            { id: 'seller_orders', label: 'Seller Orders', icon: <ShoppingBag className="w-4 h-4 text-sky-400 font-bold animate-pulse" /> },
             { id: 'reseller_page', label: 'Reseller Page Options', icon: <UserCheck className="w-4 h-4 text-emerald-400" /> },
-          ].map(menu => (
-            <button
-              key={menu.id}
-              onClick={() => setActiveTab(menu.id as any)}
-              className={`w-full text-left p-3 rounded-xl text-xs font-bold transition-all flex items-center gap-3 ${activeTab === menu.id ? 'bg-pink-600 text-white shadow-lg shadow-pink-600/20' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}
-            >
-              {menu.icon}
-              <span>{menu.label}</span>
-            </button>
-          ))}
+            { id: 'affiliate', label: 'Affiliate Program Settings', icon: <Award className="w-4 h-4 text-pink-400 font-bold" /> },
+          ].map(menu => {
+            const pendingCount = getPendingCount(menu.id);
+            return (
+              <button
+                key={menu.id}
+                onClick={() => setActiveTab(menu.id as any)}
+                className={`w-full text-left p-3 rounded-xl text-xs font-bold transition-all flex items-center justify-between cursor-pointer ${activeTab === menu.id ? 'bg-pink-650 bg-pink-600 text-white shadow-lg shadow-pink-600/20' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}
+              >
+                <div className="flex items-center gap-3 truncate">
+                  <div className="shrink-0">{menu.icon}</div>
+                  <span className="truncate">{menu.label}</span>
+                </div>
+                {pendingCount > 0 && (
+                  <span className={`shrink-0 ml-1.5 px-2 py-0.5 text-[9.5px] font-black rounded-full font-mono transition-colors leading-none ${activeTab === menu.id ? 'bg-white text-pink-600' : 'bg-pink-500 text-white'}`}>
+                    {pendingCount}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </nav>
 
         <div className="p-4 border-t border-slate-800">
@@ -1244,19 +1537,47 @@ export default function AdminPanel({
             animate={{ opacity: 1 }}
             className="space-y-6"
           >
-            <div className="bg-white p-6 border rounded-3xl shadow-sm">
+            <div className="bg-white p-6 border rounded-3xl shadow-sm max-w-xl">
               <h3 className="font-extrabold text-sm uppercase mb-4 text-slate-900">Form New Department Category</h3>
-              <form onSubmit={createCategory} className="flex gap-3 max-w-md">
-                <input 
-                  type="text" 
-                  placeholder="e.g. LUXURY SOUND" 
-                  className="form-input text-xs py-2.5 flex-1"
-                  required
-                  value={newCat}
-                  onChange={(e) => setNewCat(e.target.value)}
-                />
-                <button type="submit" className="bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs px-6 rounded-xl">
-                  Enforce List
+              <form onSubmit={createCategory} className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Category Name</label>
+                    <input 
+                      type="text" 
+                      placeholder="e.g. LUXURY SOUND" 
+                      className="form-input text-xs py-2.5 w-full font-bold uppercase"
+                      required
+                      value={newCat}
+                      onChange={(e) => setNewCat(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Upload Photo (Image)</label>
+                    <input 
+                      type="file" 
+                      accept="image/*"
+                      onChange={handleCategoryImgUpload}
+                      className="block w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-extrabold file:bg-pink-50 file:text-pink-655 hover:file:bg-pink-100 cursor-pointer"
+                    />
+                  </div>
+                </div>
+
+                {newCatImg && (
+                  <div className="mt-2 p-2 border rounded-2xl inline-block bg-slate-50 relative">
+                    <img src={newCatImg} alt="Preview" className="w-16 h-16 object-cover rounded-xl border" />
+                    <button 
+                      type="button" 
+                      onClick={() => setNewCatImg('')}
+                      className="absolute -top-1.5 -right-1.5 bg-red-500 text-white p-1 rounded-full hover:bg-red-650 transition-colors shadow-sm cursor-pointer"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                )}
+
+                <button type="submit" className="w-full bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs py-2.5 rounded-xl uppercase tracking-wider block">
+                  Enforce List Category
                 </button>
               </form>
             </div>
@@ -1265,7 +1586,12 @@ export default function AdminPanel({
               <h3 className="font-extrabold text-sm text-slate-700">Listed Categories</h3>
               {categories.map(c => (
                 <div key={c.id} className="bg-white border rounded-2xl p-4 flex justify-between items-center max-w-xl shadow-xs">
-                  <span className="font-extrabold text-xs tracking-wider text-slate-800">{c.name}</span>
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl overflow-hidden bg-slate-105 flex items-center justify-center p-0.5 border border-slate-200 shrink-0">
+                      <img src={c.image || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=150&q=80'} alt={c.name} className="w-full h-full object-cover rounded-lg" />
+                    </div>
+                    <span className="font-extrabold text-xs tracking-wider text-slate-800 uppercase">{c.name}</span>
+                  </div>
                   <div className="flex gap-2">
                     <button onClick={() => setEditingCategory(c)} className="p-1.5 border hover:bg-slate-50 text-slate-600 rounded-lg">
                       <Edit className="w-3.5 h-3.5" />
@@ -1318,71 +1644,146 @@ export default function AdminPanel({
             animate={{ opacity: 1 }}
             className="space-y-6"
           >
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="bg-white p-6 border rounded-3xl shadow-sm space-y-3">
-                <h3 className="font-extrabold text-sm uppercase text-slate-900">Upload New Promotional Banner</h3>
-                <input type="file" accept="image/*" className="form-input text-xs py-2" onChange={handleBannerImgUpload} />
-                <p className="text-[9px] text-slate-400">Recommended graphic width is 1200px or larger. Upload to add automatic rotation loop.</p>
-              </div>
+            {/* Toggle sub-tabs */}
+            <div className="flex border-b border-slate-150 mb-6 gap-6">
+              <button
+                type="button"
+                onClick={() => setBannerSubTab('customer')}
+                className={`pb-3 font-black text-xs uppercase tracking-wider relative cursor-pointer transition-colors ${bannerSubTab === 'customer' ? 'text-pink-650 text-pink-600' : 'text-slate-400 hover:text-slate-600'}`}
+              >
+                Customer Store Banners
+                {bannerSubTab === 'customer' && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-pink-600 rounded-full" />}
+              </button>
+              <button
+                type="button"
+                onClick={() => setBannerSubTab('reseller')}
+                className={`pb-3 font-black text-xs uppercase tracking-wider relative cursor-pointer transition-colors ${bannerSubTab === 'reseller' ? 'text-pink-650 text-pink-600' : 'text-slate-400 hover:text-slate-600'}`}
+              >
+                Reseller Dashboard Banners
+                {bannerSubTab === 'reseller' && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-pink-600 rounded-full" />}
+              </button>
+            </div>
 
-              {/* Banner Height Custom Adjustment Controls */}
-              <div className="bg-white p-6 border rounded-3xl shadow-sm space-y-3">
-                <div>
-                  <h3 className="font-extrabold text-sm uppercase text-slate-900 leading-none">Banner Size & Height Adjuster</h3>
-                  <p className="text-[10px] text-slate-400 mt-1">Coordinate slider heights to perfectly match your left categories sidebar.</p>
+            {bannerSubTab === 'customer' ? (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="bg-white p-6 border rounded-3xl shadow-sm space-y-3">
+                    <h3 className="font-extrabold text-sm uppercase text-slate-900">Upload New Promotional Banner</h3>
+                    <input type="file" accept="image/*" className="form-input text-xs py-2" onChange={handleBannerImgUpload} />
+                    <p className="text-[9px] text-slate-400">Recommended graphic width is 1200px or larger. Upload to add automatic rotation loop.</p>
+                  </div>
+
+                  {/* Banner Height Custom Adjustment Controls */}
+                  <div className="bg-white p-6 border rounded-3xl shadow-sm space-y-3">
+                    <div>
+                      <h3 className="font-extrabold text-sm uppercase text-slate-900 leading-none">Banner Size & Height Adjuster</h3>
+                      <p className="text-[10px] text-slate-400 mt-1">Coordinate slider heights to perfectly match your left categories sidebar.</p>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 pt-1">
+                      {[
+                        { value: 'small', label: 'Compact', desc: 'Short height row' },
+                        { value: 'medium', label: 'Standard', desc: 'Best sidebar match' },
+                        { value: 'large', label: 'Expanded', desc: 'High visibility banner' }
+                      ].map(item => (
+                        <button
+                          key={item.value}
+                          type="button"
+                          onClick={() => {
+                            setBannerHeight(item.value);
+                            showNotif(`Storefront banner height modified to: ${item.label}`, 'success');
+                          }}
+                          className={`p-2.5 border rounded-2xl text-left cursor-pointer transition-all ${bannerHeight === item.value ? 'border-pink-500 bg-pink-50/50 shadow-sm ring-1 ring-pink-500/20' : 'border-slate-200 hover:bg-slate-50'}`}
+                        >
+                          <span className={`block text-[10px] font-black uppercase tracking-wider ${bannerHeight === item.value ? 'text-pink-600' : 'text-slate-800'}`}>{item.label}</span>
+                          <span className="block text-[8px] text-slate-400 mt-0.5 font-medium leading-tight">{item.desc}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
-                <div className="grid grid-cols-3 gap-2 pt-1">
-                  {[
-                    { value: 'small', label: 'Compact', desc: 'Short height row' },
-                    { value: 'medium', label: 'Standard', desc: 'Best sidebar match' },
-                    { value: 'large', label: 'Expanded', desc: 'High visibility banner' }
-                  ].map(item => (
-                    <button
-                      key={item.value}
-                      type="button"
-                      onClick={() => {
-                        setBannerHeight(item.value);
-                        showNotif(`Storefront banner height modified to: ${item.label}`, 'success');
-                      }}
-                      className={`p-2.5 border rounded-2xl text-left cursor-pointer transition-all ${bannerHeight === item.value ? 'border-pink-500 bg-pink-50/50 shadow-sm ring-1 ring-pink-500/20' : 'border-slate-200 hover:bg-slate-50'}`}
-                    >
-                      <span className={`block text-[10px] font-black uppercase tracking-wider ${bannerHeight === item.value ? 'text-pink-600' : 'text-slate-800'}`}>{item.label}</span>
-                      <span className="block text-[8px] text-slate-400 mt-0.5 font-medium leading-tight">{item.desc}</span>
-                    </button>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mt-6">
+                  {banners.map(ban => (
+                    <div key={ban.id} className="border bg-white rounded-2xl overflow-hidden relative group shadow-sm flex flex-col justify-between">
+                      <div className="relative">
+                        <img src={ban.img} className={`w-full object-cover ${bannerHeight === 'small' ? 'h-[90px] sm:h-[120px]' : bannerHeight === 'large' ? 'h-[140px] sm:h-[180px]' : 'h-[115px] sm:h-[150px]'}`} alt="Campaign Banner" />
+                        <button 
+                          type="button"
+                          onClick={() => setBanners(prev => prev.filter(b => b.id !== ban.id))}
+                          className="absolute top-2 right-2 bg-red-650 hover:bg-red-750 bg-red-600 font-bold text-white p-2 rounded-full shadow-lg transition-all"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      <div className="p-3 bg-slate-50 border-t border-slate-100">
+                        <label className="text-[9px] font-black uppercase text-slate-400 block mb-1">Banner Redirection Link</label>
+                        <input 
+                          type="text" 
+                          className="w-full text-xs font-semibold p-2 border border-slate-250 bg-white rounded-lg focus:border-pink-400 focus:outline-none"
+                          placeholder="e.g. https://domain.com/category or #cat_free"
+                          value={ban.link || ''}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setBanners(prev => prev.map(b => b.id === ban.id ? { ...b, link: val } : b));
+                          }}
+                        />
+                      </div>
+                    </div>
                   ))}
                 </div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mt-6">
-              {banners.map(ban => (
-                <div key={ban.id} className="border bg-white rounded-2xl overflow-hidden relative group shadow-sm flex flex-col justify-between">
-                  <div className="relative">
-                    <img src={ban.img} className={`w-full object-cover ${bannerHeight === 'small' ? 'h-[90px] sm:h-[120px]' : bannerHeight === 'large' ? 'h-[140px] sm:h-[180px]' : 'h-[115px] sm:h-[150px]'}`} alt="Campaign Banner" />
-                    <button 
-                      type="button"
-                      onClick={() => setBanners(prev => prev.filter(b => b.id !== ban.id))}
-                      className="absolute top-2 right-2 bg-red-650 hover:bg-red-750 bg-red-600 font-bold text-white p-2 rounded-full shadow-lg transition-all"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                  <div className="p-3 bg-slate-50 border-t border-slate-100">
-                    <label className="text-[9px] font-black uppercase text-slate-400 block mb-1">Banner Redirection Link</label>
-                    <input 
-                      type="text" 
-                      className="w-full text-xs font-semibold p-2 border border-slate-250 bg-white rounded-lg focus:border-pink-400 focus:outline-none"
-                      placeholder="e.g. https://domain.com/category or #cat_free"
-                      value={ban.link || ''}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setBanners(prev => prev.map(b => b.id === ban.id ? { ...b, link: val } : b));
-                      }}
-                    />
-                  </div>
+              </>
+            ) : (
+              <>
+                <div className="bg-white p-6 border rounded-3xl shadow-sm space-y-3">
+                  <h3 className="font-extrabold text-sm uppercase text-slate-900">Upload New Reseller Banner</h3>
+                  <input type="file" accept="image/*" className="form-input text-xs py-2" onChange={handleResellerBannerImgUpload} />
+                  <p className="text-[9px] text-slate-400">These banners will display inside the Reseller Dashboard to highlight target points, support channels, or group coordinates.</p>
                 </div>
-              ))}
-            </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mt-6">
+                  {resellerBanners.map(ban => (
+                    <div key={ban.id} className="border bg-white rounded-2xl overflow-hidden relative group shadow-sm flex flex-col justify-between">
+                      <div className="relative">
+                        <img src={ban.img} className="w-full object-cover h-[115px] sm:h-[150px]" alt="Reseller Activity Banner" />
+                        <button 
+                          type="button"
+                          onClick={() => {
+                            if (setResellerBanners) {
+                              setResellerBanners(prev => prev.filter(b => b.id !== ban.id));
+                              showNotif("Reseller marketing banner deleted.", "error");
+                            }
+                          }}
+                          className="absolute top-2 right-2 bg-red-650 hover:bg-red-750 bg-red-600 font-bold text-white p-2 rounded-full shadow-lg transition-all"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      <div className="p-3 bg-slate-50 border-t border-slate-100">
+                        <label className="text-[9px] font-black uppercase text-slate-400 block mb-1">Redirection Link (রিডাইরেক্ট লিংক)</label>
+                        <input 
+                          type="text" 
+                          className="w-full text-xs font-semibold p-2 border border-slate-250 bg-white rounded-lg focus:border-pink-400 focus:outline-none"
+                          placeholder="e.g. https://wa.me/... or custom support URL"
+                          value={ban.link || ''}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (setResellerBanners) {
+                              setResellerBanners(prev => prev.map(b => b.id === ban.id ? { ...b, link: val } : b));
+                            }
+                          }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                  {resellerBanners.length === 0 && (
+                    <div className="col-span-full border border-dashed border-slate-250 py-12 rounded-3xl text-center text-slate-400 bg-slate-50/50">
+                      <p className="font-extrabold text-sm">No reseller banners uploaded yet.</p>
+                      <p className="text-xs mt-1">Configure Reseller-specific promo announcements or official WhatsApp updates here.</p>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
           </motion.div>
         )}
 
@@ -1975,7 +2376,23 @@ export default function AdminPanel({
             className="space-y-4"
           >
             {(() => {
-              const customerOrders = orders.filter(o => o.type !== 'reseller');
+              const customerOrders = orders
+                .filter(o => o.type !== 'reseller')
+                .sort((a, b) => {
+                  const aTimeStr = a.id.replace('o_demo', '').replace('o_', '');
+                  const bTimeStr = b.id.replace('o_demo', '').replace('o_', '');
+                  const aTimeNum = parseInt(aTimeStr, 10);
+                  const bTimeNum = parseInt(bTimeStr, 10);
+                  if (!isNaN(aTimeNum) && !isNaN(bTimeNum)) {
+                    return bTimeNum - aTimeNum;
+                  }
+                  const aDate = Date.parse(a.date);
+                  const bDate = Date.parse(b.date);
+                  if (!isNaN(aDate) && !isNaN(bDate) && aDate !== bDate) {
+                    return bDate - aDate;
+                  }
+                  return b.id.localeCompare(a.id);
+                });
               const filteredOrders = customerOrders.filter(
                 o => custOrderFilter === 'all' || o.status === custOrderFilter
               );
@@ -2000,7 +2417,8 @@ export default function AdminPanel({
                         { id: 'Processing', label: 'Warehouse Packaging', count: customerOrders.filter(o => o.status === 'Processing').length },
                         { id: 'Shipped', label: 'Dispatched In Transit', count: customerOrders.filter(o => o.status === 'Shipped').length },
                         { id: 'Delivered', label: 'Delivered Successfully', count: customerOrders.filter(o => o.status === 'Delivered').length },
-                        { id: 'Cancelled', label: 'Cancelled / Returned', count: customerOrders.filter(o => o.status === 'Cancelled').length }
+                        { id: 'Cancelled', label: 'Cancelled', count: customerOrders.filter(o => o.status === 'Cancelled').length },
+                        { id: 'Returned', label: 'Returned', count: customerOrders.filter(o => o.status === 'Returned').length }
                       ].map(tab => (
                         <button
                           key={tab.id}
@@ -2065,8 +2483,8 @@ export default function AdminPanel({
                               </div>
                             </div>
 
-                            {/* Customer dispatch details */}
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-50 p-3 rounded-xl border">
+                             {/* Customer dispatch details */}
+                            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 bg-slate-50 p-3 rounded-xl border">
                               <div>
                                 <p className="text-[9px] text-zinc-400 font-bold">CARRIER ITEM</p>
                                 <p className="font-bold text-slate-800 mt-0.5 truncate">{o.productName}</p>
@@ -2080,7 +2498,10 @@ export default function AdminPanel({
                               </div>
                               <div>
                                 <p className="text-[9px] text-zinc-400 font-bold">SHIPPING ADDRESS</p>
-                                <p className="font-medium text-slate-500 mt-0.5 leading-snug line-clamp-2 truncate">{o.custAddress}</p>
+                                <p className="font-medium text-slate-500 mt-0.5 leading-snug line-clamp-2 truncate" title={o.custAddress}>{o.custAddress}</p>
+                              </div>
+                              <div className="md:border-l md:pl-4 border-slate-150">
+                                <TinyInvoiceDetails order={o} />
                               </div>
                             </div>
 
@@ -2190,7 +2611,23 @@ export default function AdminPanel({
             className="space-y-4"
           >
             {(() => {
-              const resellerOrders = orders.filter(o => o.type === 'reseller');
+              const resellerOrders = orders
+                .filter(o => o.type === 'reseller')
+                .sort((a, b) => {
+                  const aTimeStr = a.id.replace('o_demo', '').replace('o_', '');
+                  const bTimeStr = b.id.replace('o_demo', '').replace('o_', '');
+                  const aTimeNum = parseInt(aTimeStr, 10);
+                  const bTimeNum = parseInt(bTimeStr, 10);
+                  if (!isNaN(aTimeNum) && !isNaN(bTimeNum)) {
+                    return bTimeNum - aTimeNum;
+                  }
+                  const aDate = Date.parse(a.date);
+                  const bDate = Date.parse(b.date);
+                  if (!isNaN(aDate) && !isNaN(bDate) && aDate !== bDate) {
+                    return bDate - aDate;
+                  }
+                  return b.id.localeCompare(a.id);
+                });
               const filteredOrders = resellerOrders.filter(
                 o => resellerOrderFilter === 'all' || o.status === resellerOrderFilter
               );
@@ -2215,7 +2652,8 @@ export default function AdminPanel({
                         { id: 'Processing', label: 'Warehouse Packaging', count: resellerOrders.filter(o => o.status === 'Processing').length },
                         { id: 'Shipped', label: 'Dispatched In Transit', count: resellerOrders.filter(o => o.status === 'Shipped').length },
                         { id: 'Delivered', label: 'Delivered Successfully', count: resellerOrders.filter(o => o.status === 'Delivered').length },
-                        { id: 'Cancelled', label: 'Cancelled / Returned', count: resellerOrders.filter(o => o.status === 'Cancelled').length }
+                        { id: 'Cancelled', label: 'Cancelled', count: resellerOrders.filter(o => o.status === 'Cancelled').length },
+                        { id: 'Returned', label: 'Returned', count: resellerOrders.filter(o => o.status === 'Returned').length }
                       ].map(tab => (
                         <button
                           key={tab.id}
@@ -2306,7 +2744,7 @@ export default function AdminPanel({
                             </div>
 
                             {/* Customer dispatch details */}
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-50 p-3 rounded-xl border">
+                            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 bg-slate-50 p-3 rounded-xl border">
                               <div>
                                 <p className="text-[9px] text-zinc-400 font-bold">CARRIER ITEM</p>
                                 <p className="font-bold text-slate-800 mt-0.5 truncate">{o.productName}</p>
@@ -2320,7 +2758,10 @@ export default function AdminPanel({
                               </div>
                               <div>
                                 <p className="text-[9px] text-zinc-400 font-bold">SHIPPING ADDRESS</p>
-                                <p className="font-medium text-slate-500 mt-0.5 leading-snug leading-tight truncate">{o.custAddress}</p>
+                                <p className="font-medium text-slate-500 mt-0.5 leading-snug leading-tight truncate" title={o.custAddress}>{o.custAddress}</p>
+                              </div>
+                              <div className="md:border-l md:pl-4 border-slate-150">
+                                <TinyInvoiceDetails order={o} />
                               </div>
                             </div>
 
@@ -2669,6 +3110,41 @@ export default function AdminPanel({
                   </div>
                 </div>
 
+                {/* INTERACTIVE FULL PAGE DOCUMENT EDITORS */}
+                <div className="bg-rose-50/50 border border-pink-100/50 rounded-2xl p-4 sm:p-5 mt-4 space-y-4">
+                  <h4 className="text-xs font-black text-slate-800 uppercase tracking-tight flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-pink-500 animate-pulse"></span>
+                    Interactive Customer Full-Page Document Editor
+                  </h4>
+                  <p className="text-[10px] text-slate-500 font-semibold leading-relaxed">
+                    Write beautiful raw text or complete custom HTML templates (headings, paragraphs, line breaks) below. When shoppers click on these Footer Quick Links, they will load as a stunning bespoke full-screen page with proper native styling instead of mini popups.
+                  </p>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5 text-left">
+                    <div className="space-y-1.5 text-left">
+                      <label className="block text-slate-600 font-extrabold uppercase text-[9px] tracking-wider">Privacy Policy Full Page (HTML/Text Content)</label>
+                      <textarea 
+                        rows={10}
+                        className="w-full font-mono font-semibold border border-slate-200 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-pink-500 bg-white text-xs text-slate-800"
+                        placeholder="<h1>Privacy Policy</h1><p>Our guidelines...</p>"
+                        value={footerConfig.privacyPolicyFullText || ''}
+                        onChange={(e) => setFooterConfig({ ...footerConfig, privacyPolicyFullText: e.target.value })}
+                      />
+                    </div>
+
+                    <div className="space-y-1.5 text-left">
+                      <label className="block text-slate-600 font-extrabold uppercase text-[9px] tracking-wider">Terms & Conditions Full Page (HTML/Text Content)</label>
+                      <textarea 
+                        rows={10}
+                        className="w-full font-mono font-semibold border border-slate-200 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-pink-500 bg-white text-xs text-slate-800"
+                        placeholder="<h1>Terms & Conditions</h1><p>Our specifications...</p>"
+                        value={footerConfig.termsConditionsFullText || ''}
+                        onChange={(e) => setFooterConfig({ ...footerConfig, termsConditionsFullText: e.target.value })}
+                      />
+                    </div>
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                   <div className="space-y-1">
                     <label className="block text-slate-500 font-bold uppercase text-[9px]">Facebook Social Link URL</label>
@@ -2735,11 +3211,16 @@ export default function AdminPanel({
                   </div>
 
                   <div className="space-y-1">
-                    <label className="block text-slate-500 font-bold uppercase text-[9px] text-[#e21b70]">Header Logo/Avatar Image URL</label>
+                    <label className="block text-slate-505 font-bold uppercase text-[9px] text-[#e21b70] tracking-wider">
+                      Custom Brand Logo URL (কাস্টম লোগো ইউআরএল)
+                    </label>
+                    <p className="text-[9px] text-slate-400 font-semibold leading-none mb-1">
+                      If set, this logo image replaces the "DEALY" text name and side avatar in both header and footer.
+                    </p>
                     <input 
                       type="text"
                       className="w-full font-bold border border-slate-200 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-pink-500 bg-slate-50 text-pink-600 text-xs"
-                      placeholder="https://..."
+                      placeholder="https://yourdomain.com/logo.png"
                       value={footerConfig.brandLogoUrl || ''}
                       onChange={(e) => setFooterConfig({ ...footerConfig, brandLogoUrl: e.target.value })}
                     />
@@ -2770,7 +3251,10 @@ export default function AdminPanel({
                   </div>
 
                   <div className="space-y-1">
-                    <label className="block text-slate-500 font-bold uppercase text-[9px] text-pink-600">Header Logo/Avatar File Upload</label>
+                    <label className="block text-slate-500 font-bold uppercase text-[9px] text-pink-600">Upload Header/Footer Custom Brand Logo File</label>
+                    <p className="text-[9px] text-slate-400 font-semibold leading-none mb-1">
+                      Upload your custom logo (keeps text transparent if png). Will automatically scale.
+                    </p>
                     <div className="flex items-center gap-3">
                       <label className="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-slate-200 hover:border-pink-500 bg-slate-50 hover:bg-pink-50/25 p-3 rounded-xl cursor-pointer transition-all">
                         <Upload className="w-5 h-5 text-slate-400" />
@@ -2788,7 +3272,7 @@ export default function AdminPanel({
                               }
                               const reader = new FileReader();
                               reader.onloadend = async () => {
-                                const compressed = await compressImage(reader.result as string, 250, 250, 0.7);
+                                const compressed = await compressImage(reader.result as string, 800, 300, 0.85, true);
                                 setFooterConfig({ ...footerConfig, brandLogoUrl: compressed });
                                 showNotif("Brand logo uploaded and updated successfully!", "success");
                               };
@@ -2798,8 +3282,8 @@ export default function AdminPanel({
                         />
                       </label>
                       {footerConfig.brandLogoUrl && (
-                        <div className="w-14 h-14 rounded-full overflow-hidden border-2 border-slate-200 bg-slate-50 shrink-0">
-                          <img src={footerConfig.brandLogoUrl} className="w-full h-full object-cover" />
+                        <div className="h-14 max-w-[200px] border-2 border-slate-200 bg-slate-100 p-1.5 rounded-xl shrink-0 flex items-center justify-center">
+                          <img src={footerConfig.brandLogoUrl} className="max-h-full max-w-full object-contain" />
                         </div>
                       )}
                     </div>
@@ -3006,12 +3490,27 @@ export default function AdminPanel({
                   <label className="form-label">Email Log Address</label>
                   <input type="email" className="form-input text-xs" required value={newUser.email} onChange={(e) => setNewUser({ ...newUser, email: e.target.value })} />
                 </div>
-                <div className="form-group">
+                <div className="form-group pb-1">
                   <label className="form-label">Password Key</label>
-                  <input type="password" className="form-input text-xs" required value={newUser.pass} onChange={(e) => setNewUser({ ...newUser, pass: e.target.value })} />
+                  <div className="relative">
+                    <input 
+                      type={showNewUserPass ? "text" : "password"} 
+                      className="form-input text-xs pr-10 w-full" 
+                      required 
+                      value={newUser.pass} 
+                      onChange={(e) => setNewUser({ ...newUser, pass: e.target.value })} 
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowNewUserPass(!showNewUserPass)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-450 hover:text-slate-600 flex items-center bg-transparent border-none cursor-pointer"
+                    >
+                      {showNewUserPass ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
                 </div>
                 <div className="col-span-1 md:col-span-3 flex justify-end">
-                  <button type="submit" className="bg-slate-900 text-white font-extrabold text-xs px-6 py-2.5 rounded-xl shadow">
+                  <button type="submit" className="bg-slate-900 text-white font-extrabold text-xs px-6 py-2.5 rounded-xl shadow cursor-pointer">
                     Create Reseller Profile
                   </button>
                 </div>
@@ -3019,52 +3518,137 @@ export default function AdminPanel({
             </div>
 
             {/* List active partners */}
-            <div className="space-y-3.5 text-xs text-slate-700">
-              <h3 className="font-extrabold text-sm text-slate-700">Database Affiliates</h3>
-              {users.filter(u => u.role === 'user').map(usr => (
-                <div key={usr.id} className="bg-white rounded-2xl border p-4.5 flex gap-4 justify-between items-center flex-wrap sm:flex-nowrap shadow-xs">
-                  <div className="flex items-center gap-4.5">
-                    <div className="w-11 h-11 bg-indigo-50 border border-indigo-100 rounded-full font-black text-indigo-600 flex items-center justify-center">
-                      {usr.name.charAt(0).toUpperCase()}
-                    </div>
-                    <div>
-                      <div className="flex gap-2">
-                        <span className="font-extrabold text-slate-900">{usr.name}</span>
-                        <span className="bg-slate-100 px-2 py-0.5 rounded text-[9px] font-mono font-bold text-slate-500">{usr.idCode}</span>
+            <div className="space-y-4 text-xs text-slate-700">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-3">
+                <h3 className="font-extrabold text-sm text-slate-800">Database Affiliates & Resellers</h3>
+                
+                {/* Filter Sub-Tabs for Resellers/Affiliates */}
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    { id: 'all', label: 'All', count: users.filter(u => u.role === 'user').length },
+                    { id: 'approved', label: 'Approved', count: users.filter(u => u.role === 'user' && u.status === 'approved').length },
+                    { id: 'pending', label: 'Pending', count: users.filter(u => u.role === 'user' && u.status === 'pending').length },
+                    { id: 'verified', label: 'Verified', count: users.filter(u => u.role === 'user' && u.kyc?.status === 'verified').length },
+                    { id: 'unverified', label: 'Unverified', count: users.filter(u => u.role === 'user' && u.kyc?.status !== 'verified').length }
+                  ].map((tab) => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setResellerFilter(tab.id as any)}
+                      className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                        resellerFilter === tab.id
+                          ? 'bg-slate-900 text-white shadow-xs'
+                          : 'bg-white hover:bg-slate-50 text-slate-600 border border-slate-200'
+                      }`}
+                    >
+                      <span>{tab.label}</span>
+                      <span className={`px-1 py-0.2 rounded text-[9px] font-extrabold font-mono ${resellerFilter === tab.id ? 'bg-slate-700 text-slate-100' : 'bg-slate-100 text-slate-500'}`}>
+                        {tab.count}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {users.filter(u => {
+                if (u.role !== 'user') return false;
+                if (resellerFilter === 'approved') return u.status === 'approved';
+                if (resellerFilter === 'pending') return u.status === 'pending';
+                if (resellerFilter === 'verified') return u.kyc?.status === 'verified';
+                if (resellerFilter === 'unverified') return u.kyc?.status !== 'verified';
+                return true;
+              }).map(usr => (
+                <div key={usr.id} className="bg-white rounded-2xl border p-4.5 space-y-3.5 shadow-xs">
+                  <div className="flex gap-4 justify-between items-center flex-wrap sm:flex-nowrap">
+                    <div className="flex items-center gap-4.5">
+                      <div className="w-11 h-11 bg-indigo-50 border border-indigo-100 rounded-full font-black text-indigo-600 flex items-center justify-center shrink-0">
+                        {usr.name.charAt(0).toUpperCase()}
                       </div>
-                      <p className="text-[10px] text-slate-400 mt-1">{usr.email} | Balance : <b>৳{usr.balance}</b></p>
+                      <div>
+                        <div className="flex gap-2 items-center flex-wrap">
+                          <span className="font-extrabold text-slate-900 text-sm">{usr.name}</span>
+                          <span className="bg-slate-100 px-2 py-0.5 rounded text-[9px] font-mono font-bold text-slate-500">{formatResellerId(usr, users)}</span>
+                          <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wide ${
+                            usr.status === 'approved' 
+                              ? 'bg-green-100 text-green-800' 
+                              : usr.status === 'pending' 
+                              ? 'bg-amber-100 text-amber-800 animate-pulse'
+                              : 'bg-slate-100 text-slate-500'
+                          }`}>
+                            {usr.status || 'approved'}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-1">{usr.email} | Balance : <b>৳{usr.balance}</b></p>
+                      </div>
+                    </div>
+
+                    <div className="flex gap-2.5 items-center flex-wrap shrink-0">
+                      {/* Subscription Badge */}
+                      <span className={`inline-flex py-1 px-2.5 rounded-full font-sans text-[9px] font-bold border uppercase ${getSubscriptionCountdown(usr.subscriptionExpiresAt) === 'Expired' ? 'bg-red-50 text-red-700 border-red-200' : getSubscriptionCountdown(usr.subscriptionExpiresAt) === 'No active subscription' ? 'bg-slate-100 border-slate-200 text-slate-500' : 'bg-pink-50 text-pink-700 border-pink-200'}`}>
+                        Sub: {getSubscriptionCountdown(usr.subscriptionExpiresAt)}
+                      </span>
+
+                      {/* KYC Badge state */}
+                      <span className={`inline-flex py-1 px-2.5 rounded-full font-mono text-[9px] font-bold border uppercase ${usr.kyc?.status === 'verified' ? 'bg-emerald-50 text-emerald-700 border-emerald-150' : usr.kyc?.status === 'pending' ? 'bg-amber-50 text-amber-700 border-amber-100 animate-pulse' : 'bg-slate-100 border-slate-200 text-slate-500'}`}>
+                        KYC: {usr.kyc?.status || 'unverified'}
+                      </span>
+
+                      {usr.kyc?.status === 'pending' && (
+                        <button 
+                          onClick={() => triggerKycReview(usr)}
+                          className="bg-indigo-600 text-white font-bold px-3 py-1.5 rounded-xl text-[10px] flex items-center gap-1 cursor-pointer"
+                        >
+                          <Eye className="w-3.5 h-3.5" /> Review Document
+                        </button>
+                      )}
+
+                      <button 
+                        onClick={() => setEditingUser(usr)}
+                        className="p-1.5 border border-slate-200 bg-slate-50 hover:bg-slate-100 rounded-xl cursor-pointer"
+                      >
+                        <Plus className="w-4 h-4 text-slate-500" />
+                      </button>
+
+                      <button 
+                        onClick={() => toggleUserBanned(usr.id)}
+                        className={`p-1.5 rounded-xl cursor-pointer ${usr.banned ? 'bg-green-50 text-green-600 border border-green-200' : 'bg-red-50 text-red-600 border border-red-200'}`}
+                      >
+                        <Ban className="w-4 h-4" />
+                      </button>
                     </div>
                   </div>
 
-                  <div className="flex gap-2.5 items-center">
-                    {/* KYC Badge state */}
-                    <span className={`inline-flex py-1 px-2.5 rounded-full font-mono text-[9px] font-bold border uppercase ${usr.kyc.status === 'verified' ? 'bg-emerald-50 text-emerald-700 border-emerald-150' : usr.kyc.status === 'pending' ? 'bg-amber-50 text-amber-700 border-amber-100 animate-pulse' : 'bg-slate-100 border-slate-200 text-slate-500'}`}>
-                      KYC: {usr.kyc.status}
-                    </span>
+                  {/* PENDING RESELLER REGISTRATION PAYMENT BOX */}
+                  {usr.status === 'pending' && usr.pendingSubscription && (
+                    <div className="bg-amber-50/50 border border-dashed border-amber-200 rounded-2xl p-4.5 space-y-3">
+                      <div className="flex justify-between items-center text-[10px] font-bold text-amber-800 uppercase tracking-widest">
+                        <span>Subscription Request Details:</span>
+                        <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded text-[9px] tracking-normal font-sans">Payment Pending Approval</span>
+                      </div>
+                      
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-[11px] text-slate-705 font-semibold">
+                        <div><span className="text-slate-400">Business Name:</span> <strong className="text-slate-800">{usr.businessName || 'N/A'}</strong></div>
+                        <div><span className="text-slate-400">Address:</span> <strong className="text-slate-800">{usr.address || 'N/A'}</strong></div>
+                        <div><span className="text-slate-400">Phone:</span> <strong className="text-slate-800">{usr.phone || 'N/A'}</strong></div>
+                        <div><span className="text-slate-400">Package Title:</span> <strong className="text-indigo-600 uppercase font-bold">{usr.pendingSubscription.packageName}</strong></div>
+                        <div><span className="text-slate-400">Validity Period:</span> <strong className="text-slate-800">{usr.pendingSubscription.duration}</strong></div>
+                        <div><span className="text-slate-400">Fee Paid:</span> <strong className="text-rose-600">৳{usr.pendingSubscription.price}</strong></div>
+                        <div><span className="text-slate-400">Gateway:</span> <strong className="text-indigo-600">{usr.pendingSubscription.paymentMethod}</strong></div>
+                        <div><span className="text-slate-400">Transaction ID:</span> <span className="bg-white px-1.5 py-0.5 border rounded font-mono text-xs text-slate-900 font-bold">{usr.pendingSubscription.trxId}</span></div>
+                        <div><span className="text-slate-400">Request Date:</span> <strong className="text-slate-500 font-mono">{new Date(usr.pendingSubscription.date).toLocaleString()}</strong></div>
+                      </div>
 
-                    {usr.kyc.status === 'pending' && (
-                      <button 
-                        onClick={() => triggerKycReview(usr)}
-                        className="bg-indigo-600 text-white font-bold px-3 py-1.5 rounded-xl text-[10px] flex items-center gap-1"
-                      >
-                        <Eye className="w-3.5 h-3.5" /> Review Document
-                      </button>
-                    )}
-
-                    <button 
-                      onClick={() => setEditingUser(usr)}
-                      className="p-1.5 border border-slate-200 bg-slate-50 hover:bg-slate-100 rounded-xl"
-                    >
-                      <Plus className="w-4 h-4 text-slate-500" />
-                    </button>
-
-                    <button 
-                      onClick={() => toggleUserBanned(usr.id)}
-                      className={`p-1.5 rounded-xl ${usr.banned ? 'bg-green-50 text-green-600 border border-green-200' : 'bg-red-50 text-red-600 border border-red-200'}`}
-                    >
-                      <Ban className="w-4 h-4" />
-                    </button>
-                  </div>
+                      <div className="pt-2 flex justify-end">
+                        <button
+                          type="button"
+                          onClick={() => approveResellerSubscription(usr.id)}
+                          className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold px-4 py-2.5 rounded-xl text-[10px] uppercase tracking-wider flex items-center gap-1.5 cursor-pointer transition-all active:scale-95 shadow-md shadow-emerald-600/10"
+                        >
+                          ✓ Approve Reseller & Activate Subscription
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -3109,6 +3693,701 @@ export default function AdminPanel({
           </motion.div>
         )}
 
+        {/* MANAGE MERCHANT SELLERS DIRECTORY */}
+        {activeTab === 'manage_sellers' && (
+          <motion.div 
+            initial={{ opacity: 0 }} 
+            animate={{ opacity: 1 }}
+            className="space-y-6 text-slate-800"
+          >
+            <div className="flex justify-between items-center bg-white p-6 rounded-3xl border border-slate-100 shadow-xs animate-fade-in">
+              <div>
+                <h2 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-2">
+                  <ShoppingBag className="w-5 h-5 text-pink-500" />
+                  Merchant Multi-Vendor Directory
+                </h2>
+                <p className="text-xs text-slate-400 mt-1 font-semibold">
+                  Manage and monitor your marketplace sellers, view their shop profiles, and administer restriction bans.
+                </p>
+              </div>
+              <div className="bg-slate-50 px-4 py-2.5 rounded-2xl border text-center">
+                <span className="text-[10px] text-slate-400 uppercase font-bold block">Total Merchant Stores</span>
+                <span className="font-extrabold text-xl font-black text-slate-800">
+                  {users.filter(u => u.role === 'seller').length}
+                </span>
+              </div>
+            </div>
+
+            {/* SELLER REGISTRATION & PAYMENT ONBOARDING SETTINGS */}
+            <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-xs space-y-5 animate-fade-in">
+              <div>
+                <h3 className="text-sm font-black text-slate-800 flex items-center gap-2">
+                  <Bolt className="w-5 h-5 text-pink-500 animate-spin-slow" />
+                  Seller Registration Payment & Account Settings
+                </h3>
+                <p className="text-[11px] text-slate-400 font-semibold mt-1">
+                  Configure whether new merchant registrations require a setup fee payment, specify the payment numbers, fee cost, and validity.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Column 1: Config Toggles */}
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-[10px] text-slate-500 uppercase tracking-wider font-extrabold block mb-2">
+                      Seller Registration Fee Status
+                    </label>
+                    <div className="flex bg-slate-100 p-1 rounded-xl w-48 text-xs font-bold font-sans">
+                      <button 
+                        type="button"
+                        onClick={() => setSellPayOn(true)}
+                        className={`w-1/2 py-2 rounded-lg transition-all cursor-pointer border-none bg-transparent ${sellPayOn ? 'bg-white shadow text-pink-600' : 'text-slate-500'}`}
+                      >
+                        Enabled
+                      </button>
+                      <button 
+                        type="button"
+                        onClick={() => setSellPayOn(false)}
+                        className={`w-1/2 py-2 rounded-lg transition-all cursor-pointer border-none bg-transparent ${!sellPayOn ? 'bg-white shadow text-pink-600' : 'text-slate-500'}`}
+                      >
+                        Disabled
+                      </button>
+                    </div>
+                    <p className="text-[9.5px] text-slate-400 mt-2 font-medium">
+                      If enabled, sellers must input bKash/Nagad/Rocket transaction parameters to complete their registration. If disabled, they can register instantly.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[10px] text-slate-500 uppercase tracking-wider font-extrabold block mb-1">
+                        Registration Fee (BDT)
+                      </label>
+                      <input 
+                        type="number"
+                        value={sellPayAmt}
+                        onChange={(e) => setSellPayAmt(Number(e.target.value))}
+                        disabled={!sellPayOn}
+                        placeholder="e.g. 500"
+                        className="w-full text-xs font-bold border border-slate-205 hover:border-slate-350 focus:border-pink-500 bg-slate-50/20 rounded-xl px-4 py-2.5 outline-none font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-500 uppercase tracking-wider font-extrabold block mb-1">
+                        Validity Period (মেয়াদ)
+                      </label>
+                      <input 
+                        type="text"
+                        value={sellPayTerm}
+                        onChange={(e) => setSellPayTerm(e.target.value)}
+                        disabled={!sellPayOn}
+                        placeholder="e.g. 1 Year / Lifetime"
+                        className="w-full text-xs font-bold border border-slate-205 hover:border-slate-350 focus:border-pink-500 bg-slate-50/20 rounded-xl px-4 py-2.5 outline-none"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Column 2: Account Numbers */}
+                <div className="space-y-4">
+                  <div className="space-y-3">
+                    <div>
+                      <label className="text-[10.5px] text-slate-500 font-extrabold flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-pink-500 inline-block"></span> bKash Merchant/Personal Number
+                      </label>
+                      <input 
+                        type="text"
+                        value={sellPayBKash}
+                        onChange={(e) => setSellPayBKash(e.target.value)}
+                        placeholder="e.g. 017XXXXXXXX"
+                        className="w-full text-xs font-bold border border-slate-205 hover:border-slate-300 bg-slate-50/10 rounded-xl px-4 py-2.5 outline-none font-mono"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[10.5px] text-slate-500 font-extrabold flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-orange-500 inline-block"></span> Nagad Merchant/Personal Number
+                      </label>
+                      <input 
+                        type="text"
+                        value={sellPayNagad}
+                        onChange={(e) => setSellPayNagad(e.target.value)}
+                        placeholder="e.g. 017XXXXXXXX"
+                        className="w-full text-xs font-bold border border-slate-205 hover:border-slate-300 bg-slate-50/10 rounded-xl px-4 py-2.5 outline-none font-mono"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[10.5px] text-slate-500 font-extrabold flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-indigo-600 inline-block"></span> Rocket Number (with wallet digit)
+                      </label>
+                      <input 
+                        type="text"
+                        value={sellPayRocket}
+                        onChange={(e) => setSellPayRocket(e.target.value)}
+                        placeholder="e.g. 017XXXXXXXX-X"
+                        className="w-full text-xs font-bold border border-slate-205 hover:border-slate-300 bg-slate-50/10 rounded-xl px-4 py-2.5 outline-none font-mono"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-2 border-t flex justify-end">
+                <button
+                  type="button"
+                  onClick={handleSaveSellerPayConfig}
+                  className="bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-[11px] uppercase tracking-wider px-6 py-3 rounded-xl transition-all cursor-pointer shadow-sm border-none flex items-center gap-1.5"
+                >
+                  <CheckCircle className="w-4 h-4 text-emerald-400" /> Save Onboarding Settings
+                </button>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-3xl border border-slate-100 shadow-2xs overflow-hidden">
+              <div className="p-5 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
+                <h3 className="font-extrabold text-xs text-slate-500 uppercase tracking-wider">Registered Shop Accounts</h3>
+              </div>
+              
+              {users.filter(u => u.role === 'seller').length === 0 ? (
+                <div className="py-16 text-center text-slate-400 bg-white">
+                  <p className="font-black text-slate-500 mb-1">No seller partners found.</p>
+                  <p className="text-[10.5px] text-slate-400">Stores will appear once vendors register through the Merchant Console.</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto text-xs text-slate-800">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-slate-50 text-slate-500 font-extrabold border-b border-slate-100">
+                        <th className="p-4 uppercase tracking-wider text-[10px]">Shop Name</th>
+                        <th className="p-4 uppercase tracking-wider text-[10px]">Merchant Email</th>
+                        <th className="p-4 uppercase tracking-wider text-[10px]">Contact Phone</th>
+                        <th className="p-4 uppercase tracking-wider text-[10px]">Shop Rating & Stats</th>
+                        <th className="p-4 uppercase tracking-wider text-[10px]">Code</th>
+                        <th className="p-4 uppercase tracking-wider text-[10px] text-center">Status</th>
+                        <th className="p-4 uppercase tracking-wider text-[10px] text-sm text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {users.filter(u => u.role === 'seller').map(sel => {
+                        // Calculate stats with potential custom ones taking precedence
+                        const sellerName = sel.name || 'Orivian Official Store';
+                        let hash = 0;
+                        for (let i = 0; i < sellerName.length; i++) {
+                          hash = sellerName.charCodeAt(i) + ((hash << 5) - hash);
+                        }
+                        const rawRating = 82 + Math.abs(hash % 16); 
+                        const defaultRating = Math.min(rawRating, 98);
+                        const defaultShipOnTime = 92 + Math.abs((hash >> 2) % 9); 
+                        const defaultChatResponse = 85 + Math.abs((hash >> 4) % 15); 
+                        const followersVal = ((10 + Math.abs((hash >> 1) % 45)) / 10); 
+                        const defaultFollowersStr = followersVal.toFixed(1) + 'k';
+
+                        const currentRating = sel.sellerRating !== undefined ? sel.sellerRating : defaultRating;
+                        const currentShipOnTime = sel.sellerShipOnTime !== undefined ? sel.sellerShipOnTime : defaultShipOnTime;
+                        const currentChatResponse = sel.sellerChatResponse !== undefined ? sel.sellerChatResponse : defaultChatResponse;
+                        const currentFollowers = sel.sellerFollowersCount !== undefined ? sel.sellerFollowersCount : defaultFollowersStr;
+
+                        return (
+                          <React.Fragment key={sel.id}>
+                            <tr className="hover:bg-slate-50/50 transition-colors">
+                            <td className="p-4 font-extrabold text-slate-900 flex items-center gap-2">
+                              <span className="w-8 h-8 rounded-full bg-pink-100 text-pink-600 flex items-center justify-center font-black shrink-0">
+                                {sel.name ? sel.name.charAt(0).toUpperCase() : 'S'}
+                              </span>
+                              <div>
+                                <span>{sel.name}</span>
+                                <span className="block text-[9.5px] font-bold text-emerald-500 font-mono mt-0.5">ID: {sel.id}</span>
+                              </div>
+                            </td>
+                            <td className="p-4 font-semibold text-slate-600">{sel.email}</td>
+                            <td className="p-4 font-mono text-slate-600 font-bold">{sel.phone || 'N/A'}</td>
+                            <td className="p-4">
+                              <div className="bg-slate-50/80 rounded-xl p-2 md:p-2.5 border border-slate-100 text-[10.5px] space-y-1 w-44 leading-tight">
+                                <div className="flex justify-between items-center"><span className="text-slate-400 font-bold">Rating:</span> <span className="font-extrabold text-pink-600 font-mono">{currentRating}%</span></div>
+                                <div className="flex justify-between items-center"><span className="text-slate-400 font-bold">Followers:</span> <span className="font-extrabold text-slate-700 font-mono">{currentFollowers}</span></div>
+                                <div className="flex justify-between items-center"><span className="text-slate-400 font-bold">On-Time:</span> <span className="font-extrabold text-emerald-600 font-mono">{currentShipOnTime}%</span></div>
+                              </div>
+                            </td>
+                            <td className="p-4 font-mono font-black text-slate-500">{formatSellerId(sel, users)}</td>
+                            <td className="p-4 text-center">
+                              {sel.kyc?.status === 'pending' ? (
+                                <span className="inline-flex items-center gap-1 bg-amber-100 text-amber-700 border border-amber-200 px-2.5 py-1 rounded-full text-[10px] font-black animate-pulse">
+                                  ⌛ PENDING
+                                </span>
+                              ) : sel.banned ? (
+                                <span className="inline-flex items-center gap-1 bg-red-100 text-red-600 px-2.5 py-1 rounded-full text-[10px] font-black">
+                                  <X className="w-3 h-3" /> RESTRICTED
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 bg-emerald-100 text-emerald-600 px-2.5 py-1 rounded-full text-[10px] font-black">
+                                  <Check className="w-3 h-3" /> ACTIVE
+                                </span>
+                              )}
+                            </td>
+                            <td className="p-4 text-right flex items-center justify-end gap-2 h-16">
+                              <button
+                                onClick={() => setExpandedSellerId(expandedSellerId === sel.id ? null : sel.id)}
+                                className="bg-indigo-50 hover:bg-indigo-100 text-indigo-600 font-extrabold text-[11px] px-3 py-1.5 rounded-xl transition-all border border-indigo-100 cursor-pointer shrink-0"
+                              >
+                                {expandedSellerId === sel.id ? "Hide Details" : "Details"}
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setEditingSellerForStats(sel);
+                                  setEditSellerRating(currentRating);
+                                  setEditSellerFollowers(currentFollowers);
+                                  setEditSellerShipOnTime(currentShipOnTime);
+                                  setEditSellerChatResponse(currentChatResponse);
+                                }}
+                                className="bg-pink-100 hover:bg-pink-200 text-pink-600 font-black text-[11px] px-3 py-1.5 rounded-xl transition-all border border-pink-200 cursor-pointer shrink-0"
+                              >
+                                Edit Stats
+                              </button>
+                              {sel.kyc?.status === 'pending' && (
+                                <button
+                                  onClick={() => {
+                                    setUsers(prev => prev.map(u => u.id === sel.id ? { 
+                                      ...u, 
+                                      kyc: { ...u.kyc, status: 'verified' } 
+                                    } : u));
+                                    showNotif(`Seller account "${sel.name}" approved successfully! They can now log in.`, "success");
+                                  }}
+                                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[11px] px-3 py-1.5 rounded-xl transition-all shadow-sm border-none cursor-pointer shrink-0"
+                                >
+                                  Approve Shop
+                                </button>
+                              )}
+                              <button
+                                onClick={() => {
+                                  setUsers(prev => prev.map(u => u.id === sel.id ? { ...u, banned: !u.banned } : u));
+                                  showNotif(sel.banned ? `Seller "${sel.name}" has been reinstated.` : `Seller "${sel.name}" has been banned/restricted.`, "success");
+                                }}
+                                className={`px-3 py-1.5 rounded-xl text-[11px] font-extrabold transition-all cursor-pointer border-none shrink-0 ${sel.banned ? 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100' : 'bg-red-50 text-red-600 hover:bg-red-100'}`}
+                              >
+                                {sel.banned ? "Reactivate" : "Block"}
+                              </button>
+                            </td>
+                          </tr>
+                          {expandedSellerId === sel.id && (
+                            <tr key={`${sel.id}-details`} className="bg-slate-50/70">
+                              <td colSpan={7} className="p-5 border-t border-b border-dashed border-slate-200">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-[11px] leading-relaxed">
+                                  <div className="space-y-2 bg-white p-4 rounded-2xl border border-slate-100 shadow-3xs">
+                                    <h4 className="font-extrabold text-xs text-slate-800 uppercase tracking-wide border-b pb-1">
+                                      Merchant Shop Links & Socials
+                                    </h4>
+                                    <div className="space-y-1.5">
+                                      <p className="flex items-center gap-1.5">
+                                        <span className="text-slate-400 font-bold">Business Page Link:</span>
+                                        {sel.businessPageLink ? (
+                                          <a 
+                                            href={sel.businessPageLink.startsWith('http') ? sel.businessPageLink : `https://${sel.businessPageLink}`} 
+                                            target="_blank" 
+                                            rel="noopener noreferrer"
+                                            className="text-pink-600 font-black hover:underline inline-flex items-center gap-0.5"
+                                          >
+                                            {sel.businessPageLink} <ArrowUpRight className="w-3 h-3" />
+                                          </a>
+                                        ) : (
+                                          <span className="text-slate-400 italic">None provided</span>
+                                        )}
+                                      </p>
+                                      <p className="flex items-center gap-1.5">
+                                        <span className="text-slate-400 font-bold">Personal Profile URL:</span>
+                                        {sel.profileUrl ? (
+                                          <a 
+                                            href={sel.profileUrl.startsWith('http') ? sel.profileUrl : `https://${sel.profileUrl}`} 
+                                            target="_blank" 
+                                            rel="noopener noreferrer"
+                                            className="text-indigo-600 font-black hover:underline inline-flex items-center gap-0.5"
+                                          >
+                                            {sel.profileUrl} <ArrowUpRight className="w-3 h-3" />
+                                          </a>
+                                        ) : (
+                                          <span className="text-slate-400 italic">None provided</span>
+                                        )}
+                                      </p>
+                                      <p className="mt-1">
+                                        <span className="text-slate-400 font-bold block mb-0.5">Bio / Remarks:</span>
+                                        <span className="text-slate-700 font-semibold bg-slate-50 p-2 rounded-lg block border">
+                                          {sel.kyc?.nidName || "No extra bio parameters."}
+                                        </span>
+                                      </p>
+                                    </div>
+                                  </div>
+
+                                  <div className="space-y-2 bg-white p-4 rounded-2xl border border-slate-100 shadow-3xs">
+                                    <h4 className="font-extrabold text-xs text-slate-800 uppercase tracking-wide border-b pb-1">
+                                      Onboarding Payment & Support Message
+                                    </h4>
+                                    
+                                    {sel.sellerRegPayment ? (
+                                      <div className="space-y-1">
+                                        <p className="bg-emerald-50 text-emerald-800 font-bold px-2 py-0.5 rounded inline-block text-[9.5px]">
+                                          💰 REGISTRATION FEE PAID
+                                        </p>
+                                        <div className="grid grid-cols-2 gap-2 mt-2 font-semibold">
+                                          <p><span className="text-slate-400">Method:</span> <span className="font-extrabold text-slate-800">{sel.sellerRegPayment.method}</span></p>
+                                          <p><span className="text-slate-400">Paid Amount:</span> <span className="font-extrabold text-pink-600 font-mono">৳{sel.sellerRegPayment.amount}</span></p>
+                                          <p className="col-span-2"><span className="text-slate-400 font-bold">Sender Number:</span> <span className="font-mono font-bold text-slate-700">{sel.sellerRegPayment.senderPhone}</span></p>
+                                          <p className="col-span-2"><span className="text-slate-400 font-bold">Transaction ID:</span> <span className="font-mono bg-slate-100 border px-1.5 py-0.5 rounded font-black text-indigo-700 select-all">{sel.sellerRegPayment.trxId}</span></p>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <p className="text-slate-400 font-semibold mt-1 italic text-[10px]">
+                                        No upfront registration payment submitted (either registered free or payment was disabled).
+                                      </p>
+                                    )}
+
+                                    <div className="mt-2.5">
+                                      <span className="text-slate-400 font-bold block mb-0.5">Note/Support Message to Admin:</span>
+                                      <span className="text-slate-800 font-extrabold bg-pink-50/50 p-2 rounded-lg block border border-pink-100">
+                                        {sel.sellerMessage || "N/A (No additional message sent yet)"}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+
+        {/* REVIEW SELLER SUBMITTED PRODUCTS */}
+        {activeTab === 'seller_product_reviews' && (
+          <motion.div 
+            initial={{ opacity: 0 }} 
+            animate={{ opacity: 1 }}
+            className="space-y-6 text-slate-800"
+          >
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-6 rounded-3xl border border-slate-100 shadow-xs animate-fade-in animate-once">
+              <div>
+                <h2 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-2">
+                  <ShieldCheck className="w-5 h-5 text-pink-500" />
+                  Seller Products Administration Node
+                </h2>
+                <p className="text-xs text-slate-400 mt-1 font-semibold">
+                  Approve or disapprove products loaded by sellers. Approved products instantly load in client shops.
+                </p>
+              </div>
+              
+              <div className="flex gap-3">
+                <div className="bg-slate-50 px-4 py-2 rounded-2xl border text-center">
+                  <span className="text-[10px] text-slate-400 uppercase font-bold block">Pending reviews</span>
+                  <span className="font-extrabold text-lg font-black text-amber-500 font-mono">
+                    {products.filter(p => p.approvalStatus === 'pending').length}
+                  </span>
+                </div>
+                <div className="bg-slate-50 px-4 py-2 rounded-2xl border text-center">
+                  <span className="text-[10px] text-slate-400 uppercase font-bold block">Total Vendor Wares</span>
+                  <span className="font-extrabold text-lg font-black text-slate-800 font-mono">
+                    {products.filter(p => p.sellerId).length}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Sub-Filters: All, Pending, Approved, Rejected */}
+            <div className="bg-white rounded-3xl border border-slate-100 shadow-2xs overflow-hidden">
+              <div className="p-5 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <h3 className="font-extrabold text-xs text-slate-500 uppercase tracking-wider">Product Approvals</h3>
+              </div>
+
+              {products.filter(p => p.sellerId).length === 0 ? (
+                <div className="py-20 text-center text-slate-400 bg-white">
+                  <p className="font-black text-slate-500 mb-1">No seller actions detected.</p>
+                  <p className="text-xs text-slate-400">Sellers have not posted or modified any items yet.</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto text-xs text-slate-800">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-slate-50 text-slate-500 font-extrabold border-b border-slate-100 font-sans">
+                        <th className="p-4 uppercase tracking-wider text-[10px]">Product Information</th>
+                        <th className="p-4 uppercase tracking-wider text-[10px]">Merchant Seller</th>
+                        <th className="p-4 uppercase tracking-wider text-[10px]">Catalog Price</th>
+                        <th className="p-4 uppercase tracking-wider text-[10px]">Stock Condition</th>
+                        <th className="p-4 uppercase tracking-wider text-[10px]">Current Status</th>
+                        <th className="p-4 uppercase tracking-wider text-[10px] text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 font-sans">
+                      {products.filter(p => p.sellerId).map(prod => (
+                        <tr key={prod.id} className="hover:bg-slate-50/50 transition-colors">
+                          <td className="p-4 flex items-center gap-3">
+                            <img 
+                              src={prod.img || "https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=300"} 
+                              alt={prod.name} 
+                              className="w-12 h-12 rounded-xl object-contain bg-slate-50 border p-1"
+                              referrerPolicy="no-referrer"
+                            />
+                            <div>
+                              <h4 className="font-extrabold text-slate-900 text-sm">{prod.name}</h4>
+                              <p className="text-[10px] text-slate-400 mt-1 uppercase font-bold tracking-wider">ID: {prod.id}</p>
+                            </div>
+                          </td>
+                          <td className="p-4 font-semibold">
+                            <span className="block text-slate-800 font-bold">{prod.sellerName || "Merchant Store"}</span>
+                            <span className="block text-[10px] text-slate-400 font-mono">SEL_ID: {prod.sellerId}</span>
+                          </td>
+                          <td className="p-4">
+                            <div className="font-extrabold text-slate-900">৳{prod.discountPrice}</div>
+                            {prod.originalPrice > prod.discountPrice && (
+                              <div className="text-[10px] text-slate-400 line-through font-medium">৳{prod.originalPrice}</div>
+                            )}
+                          </td>
+                          <td className="p-4">
+                            {prod.inStock ? (
+                              <span className="text-emerald-600 font-bold">In Stock</span>
+                            ) : (
+                              <span className="text-red-500 font-bold">Out of Stock</span>
+                            )}
+                          </td>
+                          <td className="p-4">
+                            {prod.approvalStatus === 'approved' ? (
+                              <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-600 px-2.5 py-1 rounded-full text-[10px] font-black">
+                                <Check className="w-3 h-3" /> APPROVED
+                              </span>
+                            ) : prod.approvalStatus === 'rejected' ? (
+                              <span className="inline-flex items-center gap-1 bg-red-50 text-red-600 px-2.5 py-1 rounded-full text-[10px] font-black">
+                                <X className="w-3 h-3" /> REJECTED
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-600 px-2.5 py-1 rounded-full text-[10px] font-black animate-pulse">
+                                <Clock className="w-3.5 h-3.5 text-amber-500" /> PENDING
+                              </span>
+                            )}
+                          </td>
+                          <td className="p-4 text-right">
+                            <div className="flex gap-2 justify-end">
+                              {prod.approvalStatus !== 'approved' && (
+                                <button
+                                  onClick={() => {
+                                    setProducts(prev => prev.map(p => p.id === prod.id ? { ...p, approvalStatus: 'approved' } : p));
+                                    showNotif(`Vendor product "${prod.name}" approved successfully. It is now live!`, "success");
+                                  }}
+                                  className="bg-emerald-50 hover:bg-emerald-100 text-emerald-600 font-black px-3.5 py-1.5 rounded-xl cursor-pointer transition-all border-none"
+                                >
+                                  Approve
+                                </button>
+                              )}
+                              {prod.approvalStatus !== 'rejected' && (
+                                <button
+                                  onClick={() => {
+                                    setProducts(prev => prev.map(p => p.id === prod.id ? { ...p, approvalStatus: 'rejected' } : p));
+                                    showNotif(`Vendor product "${prod.name}" has been rejected.`, "success");
+                                  }}
+                                  className="bg-red-50 hover:bg-red-100 text-red-600 font-black px-3.5 py-1.5 rounded-xl cursor-pointer transition-all border-none"
+                                >
+                                  Reject
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+
+        {/* VIEW SELLER SPECIFIC ORDERS IN ADMIN PANEL */}
+        {activeTab === 'seller_orders' && (
+          <motion.div 
+            initial={{ opacity: 0 }} 
+            animate={{ opacity: 1 }}
+            className="space-y-6 text-slate-800"
+          >
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-6 rounded-3xl border border-slate-100 shadow-xs animate-fade-in animate-once">
+              <div>
+                <h2 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-2">
+                  <ShoppingBag className="w-5 h-5 text-sky-500" />
+                  Vendor Seller Orders Dispatch Log
+                </h2>
+                <p className="text-xs text-slate-400 mt-1 font-semibold">
+                  Overview of customer and reseller orders that were routed to registered seller stores. Sellers handle their own fulfillment and tracking steps.
+                </p>
+              </div>
+              
+              <div className="flex gap-3">
+                <div className="bg-slate-50 px-4 py-2 rounded-2xl border text-center">
+                  <span className="text-[10px] text-slate-400 uppercase font-bold block">Total Seller Orders</span>
+                  <span className="font-extrabold text-lg font-black text-slate-800 font-mono">
+                    {orders.filter(o => o.sellerId).length}
+                  </span>
+                </div>
+                <div className="bg-slate-50 px-4 py-2 rounded-2xl border text-center">
+                  <span className="text-[10px] text-slate-400 uppercase font-bold block">Pending Dispatch</span>
+                  <span className="font-extrabold text-lg font-black text-amber-500 font-mono">
+                    {orders.filter(o => o.sellerId && o.status === 'Pending').length}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Sub-Filters: All, Pending, Approved, Processing, Shipped, Delivered, Cancelled */}
+            <div className="bg-white rounded-3xl border border-slate-100 shadow-2xs overflow-hidden">
+              <div className="p-5 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <div className="flex flex-wrap gap-1.5">
+                  {(['all', 'Pending', 'Approved', 'Processing', 'Shipped', 'Delivered', 'Cancelled', 'Returned'] as const).map(f => {
+                    const count = f === 'all' 
+                      ? orders.filter(o => o.sellerId).length
+                      : orders.filter(o => o.sellerId && o.status === f).length;
+                    return (
+                      <button
+                        key={f}
+                        onClick={() => setSellerOrderFilter(f)}
+                        className={`px-3 py-1.5 rounded-xl text-[11px] font-extrabold transition-all border-none cursor-pointer ${
+                          sellerOrderFilter === f 
+                            ? 'bg-sky-500 text-white shadow-xs' 
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        {f === 'all' ? 'All Orders' : f} ({count})
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {(() => {
+                const sellerOrdersList = orders
+                  .filter(o => o.sellerId && (sellerOrderFilter === 'all' || o.status === sellerOrderFilter))
+                  .sort((a, b) => {
+                    const aTimeStr = a.id.replace('o_demo', '').replace('o_', '');
+                    const bTimeStr = b.id.replace('o_demo', '').replace('o_', '');
+                    const aTimeNum = parseInt(aTimeStr, 10);
+                    const bTimeNum = parseInt(bTimeStr, 10);
+                    if (!isNaN(aTimeNum) && !isNaN(bTimeNum)) {
+                      return bTimeNum - aTimeNum;
+                    }
+                    const aDate = Date.parse(a.date);
+                    const bDate = Date.parse(b.date);
+                    if (!isNaN(aDate) && !isNaN(bDate) && aDate !== bDate) {
+                      return bDate - aDate;
+                    }
+                    return b.id.localeCompare(a.id);
+                  });
+
+                return sellerOrdersList.length === 0 ? (
+                  <div className="py-20 text-center text-slate-400 bg-white">
+                    <ShoppingBag className="w-12 h-12 text-slate-200 mx-auto mb-3" />
+                    <p className="font-black text-slate-500 mb-1">No seller orders found.</p>
+                    <p className="text-xs text-slate-400">Orders for vendor items will show up here.</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto text-xs text-slate-800">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-slate-50 text-slate-500 font-extrabold border-b border-slate-100">
+                          <th className="p-4 uppercase tracking-wider text-[10px]">Order tracking ID</th>
+                          <th className="p-4 uppercase tracking-wider text-[10px]">Seller Store</th>
+                          <th className="p-4 uppercase tracking-wider text-[10px]">Contact Info</th>
+                          <th className="p-4 uppercase tracking-wider text-[10px]">Ordered Wares</th>
+                          <th className="p-4 uppercase tracking-wider text-[10px]">Total Bill</th>
+                          <th className="p-4 uppercase tracking-wider text-[10px] text-center">Status</th>
+                          <th className="p-4 uppercase tracking-wider text-[10px] text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 font-sans">
+                        {sellerOrdersList.map(ord => (
+                        <tr key={ord.id} className="hover:bg-slate-50/50 transition-colors">
+                          <td className="p-4">
+                            <span className="font-extrabold text-slate-900 block font-mono">{ord.trackingId}</span>
+                            <span className="block text-[10px] text-slate-400 mt-1 font-semibold">{ord.date}</span>
+                            <span className="inline-block bg-slate-100 text-[9px] text-slate-500 px-1.5 py-0.5 rounded font-bold uppercase mt-1">
+                              Via: {ord.type}
+                            </span>
+                          </td>
+                          <td className="p-4">
+                            <span className="font-extrabold text-slate-800 block">{ord.sellerName || 'Merchant Store'}</span>
+                            <span className="text-[10px] text-slate-450 font-mono">ID: {ord.sellerId}</span>
+                          </td>
+                          <td className="p-4">
+                            <span className="font-extrabold text-slate-900 block">{ord.custName}</span>
+                            <span className="text-[10.5px] text-slate-500 font-mono block mt-0.5">{ord.custPhone}</span>
+                            <span className="text-[10px] text-slate-400 block max-w-xs truncate" title={ord.custAddress}>{ord.custAddress}</span>
+                          </td>
+                          <td className="p-4 flex items-center gap-2.5">
+                            {ord.prodImg && (
+                              <img 
+                                src={ord.prodImg} 
+                                alt={ord.productName} 
+                                className="w-10 h-10 rounded-xl object-contain bg-slate-50 border p-1 shrink-0" 
+                                referrerPolicy="no-referrer"
+                              />
+                            )}
+                            <div>
+                              <span className="font-bold text-slate-900 block">{ord.productName}</span>
+                              {ord.color && <span className="text-[9.5px] text-slate-400 font-bold">Color: {ord.color}</span>}
+                            </div>
+                          </td>
+                          <td className="p-4 font-mono">
+                            <span className="font-black text-slate-900 block">৳{ord.amount}</span>
+                            <span className="text-[10px] text-slate-450 block font-normal text-[9.5px]">Method: {ord.paymentMethod || 'COD'}</span>
+                            <div className="mt-1">
+                              <TinyInvoiceDetails order={ord} />
+                            </div>
+                          </td>
+                          <td className="p-4 text-center">
+                            <span className={`inline-block px-2.5 py-1 rounded-full text-[9.5px] font-black uppercase tracking-widest ${
+                              ord.status === 'Delivered' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
+                              ord.status === 'Cancelled' ? 'bg-rose-50 text-rose-700 border border-rose-200' :
+                              ord.status === 'Pending' ? 'bg-amber-50 text-amber-700 border border-amber-200 animate-pulse' :
+                              'bg-blue-50 text-blue-700 border border-blue-200'
+                            }`}>
+                              {ord.status}
+                            </span>
+                          </td>
+                          <td className="p-4 text-right">
+                            <button
+                              onClick={() => {
+                                if (confirm(`Are you sure you want to cancel Order ${ord.trackingId}?`)) {
+                                  const updatedTimeline = [
+                                    ...ord.timeline,
+                                    {
+                                      status: 'Cancelled' as OrderStatus,
+                                      date: formatToDhakaTime(),
+                                      description: 'Cancelled by Administrative Overlay.',
+                                      isCompleted: true
+                                    }
+                                  ];
+                                  setOrders(prev => prev.map(o => o.id === ord.id ? { ...o, status: 'Cancelled', timeline: updatedTimeline } : o));
+                                  showNotif(`Order ${ord.trackingId} has been cancelled by Admin.`, "success");
+                                }
+                              }}
+                              disabled={ord.status === 'Cancelled' || ord.status === 'Delivered'}
+                              className={`px-3 py-1.5 rounded-xl text-[10.5px] font-black transition-all cursor-pointer border-none ${
+                                ord.status === 'Cancelled' || ord.status === 'Delivered'
+                                  ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                                  : 'bg-rose-50 text-rose-600 hover:bg-rose-100'
+                              }`}
+                            >
+                              Cancel Order
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ); })()}
+            </div>
+          </motion.div>
+        )}
+
         {activeTab === 'reseller_page' && resellerPageConfig && (
           <motion.div 
             initial={{ opacity: 0 }} 
@@ -3123,8 +4402,8 @@ export default function AdminPanel({
             </div>
 
             {/* Sub-tab pills */}
-            <div className="flex bg-slate-100 p-1.5 rounded-2xl gap-1 w-fit border border-slate-200">
-              {(['content', 'subscriptions', 'faqs', 'benefits'] as const).map(tab => (
+            <div className="flex bg-slate-100 p-1.5 rounded-2xl gap-1.5 w-fit border border-slate-200 flex-wrap">
+              {(['content', 'subscriptions', 'faqs', 'benefits', 'referrals'] as const).map(tab => (
                 <button
                   key={tab}
                   type="button"
@@ -3135,6 +4414,7 @@ export default function AdminPanel({
                   {tab === 'subscriptions' && 'Subscription Packages'}
                   {tab === 'faqs' && 'FAQ List Management'}
                   {tab === 'benefits' && 'Benefits Cards'}
+                  {tab === 'referrals' && 'Referral Rewards System ✨'}
                 </button>
               ))}
             </div>
@@ -3689,6 +4969,122 @@ export default function AdminPanel({
                         </div>
                       </div>
                     ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Sub-tab 5: Referral Settings & Team Commissions */}
+            {resellerSubTab === 'referrals' && (
+              <div id="referrals-payout-setup" className="bg-white p-6 rounded-3xl border border-slate-200 shadow-xs space-y-6">
+                <div className="border-b pb-3 flex justify-between items-center">
+                  <div>
+                    <h3 className="font-extrabold text-sm text-slate-900 uppercase">Referral Commissions & Referral Program Controls</h3>
+                    <p className="text-[10px] text-slate-400 font-bold">রিসেলারদের রেফারেল কমিশন সেট করুন এবং টিম আয়ের হিসেব দেখুন</p>
+                  </div>
+                  <span className="bg-emerald-50 text-emerald-700 px-3 py-1 rounded-full text-[10px] uppercase font-black tracking-wider border border-emerald-200/50">
+                    Active System
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-xs font-sans">
+                  {/* Referral Rate config */}
+                  <div className="bg-slate-50 border rounded-2xl p-5 space-y-4">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-lg bg-pink-50 flex items-center justify-center text-pink-600 font-extrabold">
+                        ৳
+                      </div>
+                      <div>
+                        <h4 className="font-extrabold text-slate-800 text-xs">Approval Referral Reward Amount</h4>
+                        <p className="text-[9px] text-zinc-400">প্রতিটি রিজেক্ট না হওয়া, অ্যাপ্রুভড রিসেলারের জন্য রেফারার কত পাবে</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 pt-1.5">
+                      <div className="relative flex-1">
+                        <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500 font-extrabold text-sm">৳</span>
+                        <input 
+                          type="number" 
+                          className="w-full bg-white border border-slate-200 rounded-xl pl-8 pr-12 py-3 text-sm font-black font-mono text-slate-800 focus:outline-none"
+                          value={resellerReferralReward} 
+                          onChange={(e) => setResellerReferralReward && setResellerReferralReward(Number(e.target.value))} 
+                        />
+                        <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[10px] text-zinc-400 font-black">BDT</span>
+                      </div>
+                    </div>
+                    <p className="text-[9px] text-slate-400 leading-normal">
+                      When a new partner registers with a valid RES Code and the admin approves their application, this exact BDT amount is credited directly into the referrer's wallet.
+                    </p>
+                  </div>
+
+                  {/* Highlights statistics card */}
+                  <div className="bg-slate-50 border rounded-2xl p-5 flex flex-col justify-between">
+                    <div>
+                      <h4 className="font-extrabold text-slate-800 text-xs uppercase tracking-wider mb-3">Referrals Summary Indicator</h4>
+                      <div className="space-y-2.5">
+                        <div className="flex justify-between items-center bg-white border px-3 py-2 rounded-xl text-[11px]">
+                          <span className="text-slate-500 font-medium">Referred Resellers Count:</span>
+                          <span className="font-black font-mono text-slate-800">
+                            {users.filter(u => u.referredBy).length} user(s)
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center bg-white border px-3 py-2 rounded-xl text-[11px]">
+                          <span className="text-slate-500 font-medium font-bold font-sans">Accumulated Referral Commissions Paid:</span>
+                          <span className="font-black font-mono text-pink-650">
+                            ৳{users.reduce((sum, u) => {
+                              const refBonus = (u.activities || [])
+                                .filter(act => act.type === 'profit' && act.desc.toLowerCase().includes('referral'))
+                                .reduce((s, act) => s + act.amount, 0);
+                              return sum + refBonus;
+                            }, 0)} BDT
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    <p className="text-[9px] text-slate-400 leading-relaxed mt-4 font-sans">
+                      Referral commissions are calculated on successful approved partner signups.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Listing of users and their referred partners */}
+                <div className="border rounded-2xl overflow-hidden text-xs">
+                  <div className="bg-slate-50 border-b px-4 py-3">
+                    <h4 className="font-extrabold text-xs text-slate-800 uppercase tracking-wider">Top Referral Team Builders</h4>
+                  </div>
+                  <div className="divide-y">
+                    {users.filter(u => users.some(sub => sub.referredBy === u.idCode)).length === 0 ? (
+                      <p className="text-slate-400 py-8 text-center font-semibold">No team builders/referrers logged yet.</p>
+                    ) : (
+                      users.filter(u => users.some(sub => sub.referredBy === u.idCode)).map(usr => {
+                        const myTeam = users.filter(sub => sub.referredBy === usr.idCode);
+                        const cumulativeEarning = (usr.activities || [])
+                          .filter(act => act.type === 'profit' && act.desc.toLowerCase().includes('referral'))
+                          .reduce((s, act) => s + act.amount, 0);
+
+                        return (
+                          <div key={usr.id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-slate-50/50">
+                            <div className="flex items-center gap-3">
+                              <div className="w-9 h-9 rounded-xl bg-pink-50 text-pink-600 flex items-center justify-center font-black">
+                                {usr.name.substring(0, 1).toUpperCase()}
+                              </div>
+                              <div>
+                                <span className="font-extrabold text-slate-900 text-sm block">{usr.name}</span>
+                                <span className="text-[10px] text-slate-450 font-bold font-mono uppercase mt-0.5 block">{usr.idCode} • {usr.phone || 'No phone'}</span>
+                              </div>
+                            </div>
+                            <div className="flex gap-4 items-center self-end sm:self-auto font-mono text-[11px]">
+                              <span className="bg-slate-100 text-slate-705 font-bold text-slate-700 px-3 py-1 rounded-lg border">
+                                Team: {myTeam.length} partner(s)
+                              </span>
+                              <span className="bg-pink-50 text-pink-705 font-black text-pink-700 px-3 py-1 rounded-lg border border-pink-100">
+                                Earned: ৳{cumulativeEarning}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
                   </div>
                 </div>
               </div>
@@ -4326,6 +5722,617 @@ export default function AdminPanel({
           </motion.div>
         )}
 
+        {activeTab === 'affiliate' && (
+          <motion.div 
+            initial={{ opacity: 0 }} 
+            animate={{ opacity: 1 }}
+            className="space-y-6 text-slate-800 animate-fade-in"
+          >
+            <div>
+              <h2 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-2">
+                <Award className="w-5 h-5 text-pink-600" /> Affiliate Program Dashboard & Settings (অ্যাফিলিয়েট প্রোগ্রাম সেটিংস)
+              </h2>
+              <p className="text-xs text-slate-400 mt-1">
+                Customize referral commission rates, manage affiliate tasks, approve user earnings proof, and supervise payouts.
+              </p>
+            </div>
+
+            {/* Core Stats Overview */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4" id="admin_aff_stats">
+              <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-3xs" id="admin_stat_click_rate">
+                <p className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Per Click Reward Rate</p>
+                <h3 className="text-2xl font-black text-pink-650 mt-1">৳ {affiliateRatePerClick}</h3>
+                <p className="text-[10px] text-slate-450 mt-1">Current dynamic rate per unique click</p>
+              </div>
+              <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-3xs" id="admin_stat_total_accounts">
+                <p className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Total Affiliate Accounts</p>
+                <h3 className="text-2xl font-black text-slate-800 mt-1">{affiliateAccounts.length}</h3>
+                <p className="text-[10px] text-slate-450 mt-1">Users/customers registered in system</p>
+              </div>
+              <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-3xs" id="admin_stat_pending_tasks">
+                <p className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Pending Task Proofs</p>
+                <h3 className="text-2xl font-black text-amber-600 mt-1">
+                  {affiliateSubmissions.filter(s => s.status === 'pending').length}
+                </h3>
+                <p className="text-[10px] text-slate-450 mt-1">Requires supervisor manual review</p>
+              </div>
+              <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-3xs" id="admin_stat_total_clicks">
+                <p className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Total Referral Clicks Captured</p>
+                <h3 className="text-2xl font-black text-indigo-650 mt-1">
+                  {affiliateAccounts.reduce((sum, current) => sum + current.clicksCount, 0)}
+                </h3>
+                <p className="text-[10px] text-slate-450 mt-1">Simulated or real distinct click events</p>
+              </div>
+            </div>
+
+            {/* Quick Configurations */}
+            <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-3xs" id="admin_aff_global_rules">
+              <h3 className="text-sm font-extrabold text-slate-900 border-b pb-3 flex items-center gap-1.5 mb-5">
+                <Bolt className="w-4 h-4 text-pink-500" /> Global Rules & Payout Constraints (নিয়ম ও উইথড্র সেটিংস)
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-2">
+                    Commission Rate per Valid Click (৳ - Taka)
+                  </label>
+                  <div className="flex gap-2">
+                    <input 
+                      type="number" 
+                      min="0.1" 
+                      step="0.1"
+                      value={affiliateRatePerClick}
+                      onChange={(e) => setAffiliateRatePerClick(Number(e.target.value))}
+                      className="max-w-[200px] bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-extrabold focus:ring-2 focus:ring-pink-500/10 focus:outline-none"
+                    />
+                    <span className="flex items-center text-xs font-bold text-slate-400">BDT Taka</span>
+                  </div>
+                  <p className="text-[10px] text-slate-400 mt-1.5">
+                    Amount directly credited as earnings when a referred client clicks any tracking link from a unique IP address.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-2">
+                    Minimum Allowed Earnings to Request Withdrawal (৳)
+                  </label>
+                  <div className="flex gap-2">
+                    <input 
+                      type="number" 
+                      min="10" 
+                      step="10"
+                      value={affiliateMinWithdrawal}
+                      onChange={(e) => setAffiliateMinWithdrawal(Number(e.target.value))}
+                      className="max-w-[200px] bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-extrabold focus:ring-2 focus:ring-pink-500/10 focus:outline-none"
+                    />
+                    <span className="flex items-center text-xs font-bold text-slate-400">BDT Taka</span>
+                  </div>
+                  <p className="text-[10px] text-slate-400 mt-1.5">
+                    Affiliates cannot submit secure cash-out withdrawal applications until their wallet meets this threshold.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Task list and creator */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6" id="admin_tasks_grid">
+              {/* Form to create/edit Task */}
+              <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-3xs space-y-4">
+                <h3 className="text-sm font-extrabold text-slate-900 border-b pb-3 flex items-center gap-1.5">
+                  <Plus className="w-4 h-4 text-pink-500" />
+                  {editingAffTaskId ? 'Edit Affiliate Task (টাস্ক এডিট করুন)' : 'Create New Affiliate Task (টাস্ক যোগ করুন)'}
+                </h3>
+                
+                <div className="space-y-3.5">
+                  <div>
+                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1">Target Platform</label>
+                    <select 
+                      value={affTaskPlatform}
+                      onChange={(e: any) => setAffTaskPlatform(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-pink-500"
+                    >
+                      <option value="Facebook">Facebook</option>
+                      <option value="YouTube">YouTube</option>
+                      <option value="Telegram">Telegram</option>
+                      <option value="TikTok">TikTok</option>
+                      <option value="Google">Google Maps/Review</option>
+                      <option value="Custom">Custom Other</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1">Required Proof Type (প্রুফের মাধ্যম)</label>
+                    <select 
+                      value={affTaskProofType}
+                      onChange={(e: any) => setAffTaskProofType(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-pink-500"
+                    >
+                      <option value="link">Link Only (শুধু লিংক)</option>
+                      <option value="screenshot">Screenshot Only (শুধু স্ক্রিনশট)</option>
+                      <option value="both">Both Link & Screenshot (লিংক ও স্ক্রিনশট উভয়ই)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1">Task Title</label>
+                    <input 
+                      type="text"
+                      placeholder="e.g. Subscribe to our YouTube channel"
+                      value={affTaskTitle}
+                      onChange={(e) => setAffTaskTitle(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-pink-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1">Task Description / Instructions</label>
+                    <textarea 
+                      placeholder="e.g. Go to URL, subscribe & snapshot. Verify with channel name."
+                      value={affTaskDesc}
+                      onChange={(e) => setAffTaskDesc(e.target.value)}
+                      className="w-full h-24 bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-pink-500 resize-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1">Reward Prize (৳ - BDT)</label>
+                    <input 
+                      type="number"
+                      value={affTaskReward}
+                      onChange={(e) => setAffTaskReward(Number(e.target.value))}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-pink-500"
+                    />
+                  </div>
+
+                  <div className="flex gap-2 pt-2">
+                    <button
+                      onClick={() => {
+                        if (!affTaskTitle.trim() || !affTaskDesc.trim() || affTaskReward <= 0) {
+                          showNotif('Please fill in task title, description and positive prize amount', 'error');
+                          return;
+                        }
+
+                        if (editingAffTaskId) {
+                          setAffiliateTasks(prev => prev.map(t => t.id === editingAffTaskId ? {
+                            ...t,
+                            title: affTaskTitle,
+                            desc: affTaskDesc,
+                            reward: affTaskReward,
+                            platform: affTaskPlatform,
+                            requiredProofType: affTaskProofType
+                          } : t));
+                          showNotif('Affiliate task modified successfully!', 'success');
+                          setEditingAffTaskId(null);
+                        } else {
+                          const nextTask: AffiliateTask = {
+                            id: 'at_' + Date.now(),
+                            title: affTaskTitle,
+                            desc: affTaskDesc,
+                            reward: affTaskReward,
+                            status: 'active',
+                            platform: affTaskPlatform,
+                            requiredProofType: affTaskProofType
+                          };
+                          setAffiliateTasks(prev => [...prev, nextTask]);
+                          showNotif('New affiliate task created successfully!', 'success');
+                        }
+
+                        // Clear inputs
+                        setAffTaskTitle('');
+                        setAffTaskDesc('');
+                        setAffTaskReward(10);
+                        setAffTaskPlatform('Facebook');
+                        setAffTaskProofType('both');
+                      }}
+                      className="flex-1 bg-pink-600 hover:bg-pink-700 text-white font-black text-xs p-3 rounded-xl transition-all shadow-sm cursor-pointer select-none"
+                      id="save_aff_task_btn"
+                    >
+                      {editingAffTaskId ? 'Update Task' : 'Save Task'}
+                    </button>
+                    {editingAffTaskId && (
+                      <button
+                        onClick={() => {
+                          setEditingAffTaskId(null);
+                          setAffTaskTitle('');
+                          setAffTaskDesc('');
+                          setAffTaskReward(10);
+                          setAffTaskPlatform('Facebook');
+                          setAffTaskProofType('both');
+                        }}
+                        className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-extrabold text-xs px-4 rounded-xl transition-all cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Tasks List */}
+              <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-3xs space-y-4 lg:col-span-2">
+                <h3 className="text-sm font-extrabold text-slate-900 border-b pb-3 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <Award className="w-4 h-4 text-indigo-500" /> Manage Affiliate Micro Tasks (টাস্ক লিস্ট)
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-mono">Count: {affiliateTasks.length}</span>
+                </h3>
+
+                {affiliateTasks.length === 0 ? (
+                  <p className="text-center text-xs text-slate-400 py-10">No affiliate tasks defined. Create one to allow users to earn.</p>
+                ) : (
+                  <div className="space-y-3 max-h-[460px] overflow-y-auto pr-1">
+                    {affiliateTasks.map(task => (
+                      <div key={task.id} className="p-4 border border-slate-200 rounded-2xl bg-slate-50/50 flex items-start justify-between gap-4">
+                        <div className="space-y-1.5 flex-1 select-none">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[9.5px] font-black uppercase px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-600 tracking-wider">
+                              {task.platform}
+                            </span>
+                            <span className={`text-[9.5px] font-bold px-2 py-0.5 rounded-full ${task.status === 'active' ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-200 text-slate-600'}`}>
+                              {task.status === 'active' ? 'Active' : 'Paused'}
+                            </span>
+                          </div>
+                          <h4 className="text-xs font-extrabold text-slate-900">{task.title}</h4>
+                          <p className="text-[10px] text-slate-500 leading-normal">{task.desc}</p>
+                          <div className="flex flex-wrap gap-2 items-center mt-1">
+                            <span className="text-[11px] font-bold text-pink-600">Earning prize: ৳ {task.reward}</span>
+                            <span className="text-slate-300">|</span>
+                            <span className="text-[10px] text-slate-500 font-bold bg-slate-100 px-2 py-0.5 rounded">
+                              Proof: {task.requiredProofType === 'link' ? 'Link Only' : task.requiredProofType === 'screenshot' ? 'Screenshot Only' : 'Both (Link & Screenshot)'}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 border-l pl-3 py-1">
+                          <button
+                            onClick={() => {
+                              setEditingAffTaskId(task.id);
+                              setAffTaskTitle(task.title);
+                              setAffTaskDesc(task.desc);
+                              setAffTaskReward(task.reward);
+                              setAffTaskPlatform(task.platform);
+                              setAffTaskProofType(task.requiredProofType || 'both');
+                            }}
+                            className="p-1.5 text-slate-500 hover:text-indigo-650 hover:bg-slate-100 rounded-lg transition-colors"
+                            title="Edit task parameters"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => {
+                              // Toggle status
+                              setAffiliateTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: t.status === 'active' ? 'inactive' : 'active' } : t));
+                              showNotif(`Task status updated!`, 'success');
+                            }}
+                            className="p-1.5 text-slate-500 hover:text-emerald-600 hover:bg-slate-100 rounded-lg transition-colors"
+                            title="Toggle active status"
+                          >
+                            <CheckCircle className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => {
+                              if (confirm('Delete this affiliate task?')) {
+                                setAffiliateTasks(prev => prev.filter(t => t.id !== task.id));
+                                showNotif('Affiliate task deleted from catalog.', 'success');
+                              }
+                            }}
+                            className="p-1.5 text-slate-500 hover:text-red-500 hover:bg-slate-100 rounded-lg transition-colors"
+                            title="Delete task option"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Proof Submissions Section */}
+            <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-3xs space-y-4" id="admin_proof_reviews">
+              <h3 className="text-sm font-extrabold text-slate-900 border-b pb-3 flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <ShieldCheck className="w-4 h-4 text-emerald-500" /> Pending Task Submissions Review (টাস্ক প্রুফ যাচাইকরণ)
+                </span>
+                <span className="bg-slate-100 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold text-slate-550">
+                  Pending: {affiliateSubmissions.filter(s => s.status === 'pending').length}
+                </span>
+              </h3>
+
+              {affiliateSubmissions.length === 0 ? (
+                <p className="text-center text-xs text-slate-400 py-10" id="no_subs_msg">No users have submitted task proofs yet.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs text-slate-700 min-w-[700px]">
+                    <thead>
+                      <tr className="bg-slate-50 text-[10px] font-black uppercase text-slate-400 tracking-wider border-b">
+                        <th className="p-3">User Partner Info</th>
+                        <th className="p-3">E-commerce Task Details</th>
+                        <th className="p-3">Reward</th>
+                        <th className="p-3">Submitted Proof Details</th>
+                        <th className="p-3">Requested Date</th>
+                        <th className="p-3">Status</th>
+                        <th className="p-3 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-150">
+                      {affiliateSubmissions.map(sub => (
+                        <tr key={sub.id} className="hover:bg-slate-50/50 transition-colors">
+                          <td className="p-3">
+                            <div className="font-extrabold text-slate-900">{sub.userName}</div>
+                            <div className="text-[10px] font-mono text-slate-450">{sub.userPhone}</div>
+                          </td>
+                          <td className="p-3">
+                            <span className="text-[10.5px] font-extrabold text-slate-800">{sub.taskTitle}</span>
+                          </td>
+                          <td className="p-3 font-extrabold text-pink-600">৳{sub.reward}</td>
+                          <td className="p-3 max-w-[280px]">
+                            {sub.submissionLink || sub.submissionScreenshot ? (
+                              <div className="space-y-1 text-[11px]">
+                                {sub.submissionLink && (
+                                  <div>
+                                    <span className="text-[9px] uppercase font-black px-1.5 py-0.5 rounded bg-pink-50 text-pink-650 mr-1.5">Link:</span>
+                                    <a 
+                                      href={sub.submissionLink.startsWith('http') ? sub.submissionLink : `https://${sub.submissionLink}`} 
+                                      target="_blank" 
+                                      rel="noreferrer" 
+                                      className="text-pink-600 font-bold hover:underline select-text break-all"
+                                    >
+                                      {sub.submissionLink}
+                                    </a>
+                                  </div>
+                                )}
+                                {sub.submissionScreenshot && (
+                                  <div className="pt-1">
+                                    <span className="text-[9px] uppercase font-black px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-650 mr-1.5">Screenshot:</span>
+                                    {sub.submissionScreenshot.startsWith('data:image/') ? (
+                                      <div className="mt-1.5">
+                                        <div 
+                                          className="relative group inline-block w-20 h-20 rounded-lg border border-slate-200 overflow-hidden bg-slate-100 cursor-zoom-in shadow-2xs" 
+                                          onClick={() => {
+                                            const w = window.open('about:blank');
+                                            setTimeout(() => {
+                                              if (w) {
+                                                w.document.body.innerHTML = `<body style="margin:0; background:#0f172a; display:flex; justify-content:center; align-items:center; min-height:100vh;"><img src="${sub.submissionScreenshot}" style="max-width:100%; max-height:100%; object-fit:contain; box-shadow:0 25px 50px -12px rgba(0,0,0,0.5);" /></body>`;
+                                              }
+                                            }, 50);
+                                          }}
+                                        >
+                                          <img src={sub.submissionScreenshot} className="w-full h-full object-cover" alt="Proof" />
+                                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all text-white text-[9px] font-bold">
+                                            🔍 CLICK TO VIEW
+                                          </div>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <a 
+                                        href={sub.submissionScreenshot.startsWith('http') ? sub.submissionScreenshot : `https://${sub.submissionScreenshot}`} 
+                                        target="_blank" 
+                                        rel="noreferrer" 
+                                        className="text-indigo-600 font-bold hover:underline select-text break-all"
+                                      >
+                                        {sub.submissionScreenshot}
+                                      </a>
+                                    )}
+                                  </div>
+                                )}
+                                {sub.proof && (
+                                  <p className="text-[10px] text-slate-400 mt-1 italic select-text">Note: {sub.proof}</p>
+                                )}
+                              </div>
+                            ) : (
+                              <b className="text-[10.5px] text-slate-600 tracking-wide font-medium select-text">{sub.proof}</b>
+                            )}
+                          </td>
+                          <td className="p-3 font-mono text-[10.5px] text-slate-500">{sub.date}</td>
+                          <td className="p-3">
+                            <span className={`inline-block text-[9px] font-black uppercase px-2.5 py-0.5 rounded-md ${
+                              sub.status === 'approved' ? 'bg-emerald-100 text-emerald-700' :
+                              sub.status === 'rejected' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700 animate-pulse'
+                            }`}>
+                              {sub.status}
+                            </span>
+                          </td>
+                          <td className="p-3 text-right">
+                            {sub.status === 'pending' ? (
+                              <div className="flex justify-end gap-1.5">
+                                <button 
+                                  onClick={() => {
+                                    setAffiliateSubmissions(prev => prev.map(s => s.id === sub.id ? { ...s, status: 'approved' } : s));
+                                    setAffiliateAccounts(prevAccs => {
+                                      const existing = prevAccs.find(a => a.phone === sub.userPhone);
+                                      if (existing) {
+                                        return prevAccs.map(acc => {
+                                          if (acc.phone === sub.userPhone) {
+                                            return { ...acc, balance: acc.balance + sub.reward };
+                                          }
+                                          return acc;
+                                        });
+                                      } else {
+                                        return [
+                                          ...prevAccs,
+                                          {
+                                            phone: sub.userPhone,
+                                            name: sub.userName || 'Affiliate Partner',
+                                            balance: sub.reward,
+                                            clicksCount: 0,
+                                            clicksList: [],
+                                            withdrawals: []
+                                          }
+                                        ];
+                                      }
+                                    });
+                                    showNotif(`Task approved! ৳${sub.reward} BDT directly credited to user: ${sub.userPhone}`, 'success');
+                                  }}
+                                  className="bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1 rounded-lg font-extrabold text-[10px] uppercase transition-all flex items-center gap-1 cursor-pointer"
+                                >
+                                  <Check className="w-3 h-3" /> Approve
+                                </button>
+                                <button 
+                                  onClick={() => {
+                                    setAffiliateSubmissions(prev => prev.map(s => s.id === sub.id ? { ...s, status: 'rejected' } : s));
+                                    showNotif(`Task submission declined for user: ${sub.userPhone}.`, 'error');
+                                  }}
+                                  className="bg-red-100 hover:bg-red-200 text-red-700 px-2.5 py-1 rounded-lg font-extrabold text-[10px] uppercase transition-all flex items-center gap-1 cursor-pointer"
+                                >
+                                  <X className="w-3 h-3" /> Reject
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="text-[10px] text-slate-400 italic">No Action Needed</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* Affiliate Payouts Section */}
+            <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-3xs space-y-4" id="admin_aff_cashouts">
+              <h3 className="text-sm font-extrabold text-slate-900 border-b pb-3 flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <DollarSign className="w-4 h-4 text-pink-500" /> Affiliate Cash-Out Requests (অ্যাফিলিয়েট উইথড্র রিকোয়েস্ট)
+                </span>
+                <span className="bg-slate-100 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold text-slate-550">
+                  Requests count: {affiliateAccounts.reduce((sum, current) => sum + (current.withdrawals?.length || 0), 0)}
+                </span>
+              </h3>
+
+              {affiliateAccounts.every(acc => !acc.withdrawals || acc.withdrawals.length === 0) ? (
+                <p className="text-center text-xs text-slate-400 py-10">No withdrawal requests submitted recently.</p>
+              ) : (
+                <div className="overflow-x-auto text-xs">
+                  <table className="w-full text-left font-sans">
+                    <thead>
+                      <tr className="bg-slate-50 text-[10px] font-black uppercase text-slate-400 border-b">
+                        <th className="p-3">User Mobile</th>
+                        <th className="p-3">Withdrawal Amount</th>
+                        <th className="p-3">Payment Provider</th>
+                        <th className="p-3">Receiver Account Number</th>
+                        <th className="p-3">Submission Time</th>
+                        <th className="p-3">Status</th>
+                        <th className="p-3 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {affiliateAccounts.flatMap(acc => 
+                        (acc.withdrawals || []).map(wd => (
+                          <tr key={wd.id} className="hover:bg-slate-50/50">
+                            <td className="p-3 font-extrabold text-slate-900 flex flex-col">
+                              <span>{acc.name}</span>
+                              <span className="text-[10px] text-slate-450 font-mono italic">{acc.phone}</span>
+                            </td>
+                            <td className="p-3 font-extrabold text-indigo-700">৳ {wd.amount}</td>
+                            <td className="p-3 font-black text-rose-500 uppercase">{wd.method}</td>
+                            <td className="p-3 font-mono font-bold text-slate-800">{wd.accountNo}</td>
+                            <td className="p-3 font-mono text-[10px] text-slate-400">{wd.date}</td>
+                            <td className="p-3">
+                              <span className={`px-2 py-0.5 rounded text-[9.5px] font-black uppercase ${
+                                wd.status === 'approved' ? 'bg-emerald-100 text-emerald-700' :
+                                wd.status === 'rejected' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+                              }`}>
+                                {wd.status}
+                              </span>
+                            </td>
+                            <td className="p-3 text-right">
+                              {wd.status === 'pending' ? (
+                                <div className="flex justify-end gap-1.5">
+                                  <button
+                                    onClick={() => {
+                                      setAffiliateAccounts(prev => prev.map(a => {
+                                        if (a.phone === acc.phone) {
+                                          return {
+                                            ...a,
+                                            withdrawals: a.withdrawals.map(w => w.id === wd.id ? { ...w, status: 'approved' } : w)
+                                          };
+                                        }
+                                        return a;
+                                      }));
+                                      showNotif(`Affiliate withdrawal approved. Pay to ${wd.method}: ${wd.accountNo} amount ৳${wd.amount}`, 'success');
+                                    }}
+                                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[9.5px] uppercase tracking-wide px-2 py-1 rounded-md cursor-pointer"
+                                  >
+                                    Accept
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      setAffiliateAccounts(prev => prev.map(a => {
+                                        if (a.phone === acc.phone) {
+                                          return {
+                                            ...a,
+                                            balance: a.balance + wd.amount,
+                                            withdrawals: a.withdrawals.map(w => w.id === wd.id ? { ...w, status: 'rejected' } : w)
+                                          };
+                                        }
+                                        return a;
+                                      }));
+                                      showNotif(`Declined. Returned BDT ৳${wd.amount} back to ${acc.phone}'s balance.`, 'error');
+                                    }}
+                                    className="bg-red-100 text-red-650 hover:bg-red-200 font-extrabold text-[9.5px] px-2 py-1 rounded-md cursor-pointer"
+                                  >
+                                    Decline
+                                  </button>
+                                </div>
+                              ) : (
+                                <span className="text-[10px] text-slate-400 italic">Settled</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* Registered affiliate partners listing */}
+            <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-3xs space-y-4" id="admin_partners_logs">
+              <h3 className="text-sm font-extrabold text-slate-900 border-b pb-3 flex items-center gap-1.5">
+                <Users className="w-4 h-4 text-pink-500 font-bold" /> Affiliate Partners Directory Logs (রেজিস্টার্ড অংশীদারদের তালিকা)
+              </h3>
+              
+              {affiliateAccounts.length === 0 ? (
+                <p className="text-center text-xs text-slate-400 py-10">No affiliate accounts registered or auto-created yet.</p>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {affiliateAccounts.map(acc => (
+                    <div key={acc.phone} className="p-4 border border-slate-200 rounded-2.5xl bg-slate-50/50 flex flex-col justify-between space-y-3">
+                      <div>
+                        <div className="flex justify-between items-start">
+                          <h4 className="text-xs font-black text-slate-900">{acc.name}</h4>
+                          <span className="font-mono text-xs font-black text-indigo-750">৳ {acc.balance.toFixed(2)}</span>
+                        </div>
+                        <p className="text-[9.5px] font-mono text-slate-400 mt-0.5">Phone ID: {acc.phone}</p>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 border-t pt-2.5 text-[10px] text-slate-500 font-medium">
+                        <div>Clicks: <b className="text-slate-850 font-black">{acc.clicksCount}</b></div>
+                        <div>Withdrawals: <b className="text-slate-850 font-black">{acc.withdrawals?.filter(w => w.status==='approved').length || 0} approved</b></div>
+                      </div>
+
+                      {acc.clicksList?.length > 0 && (
+                        <div className="text-[9px] text-slate-400 bg-slate-100 p-2 rounded-xl mt-1 space-y-1">
+                          <div className="font-extrabold text-[8.5px] uppercase text-slate-500 tracking-wider">Latest tracked clicks:</div>
+                          {acc.clicksList.slice(0, 2).map((clk, cIdx) => (
+                            <div key={cIdx} className="flex justify-between">
+                              <span className="font-mono">{clk.ip}</span>
+                              <span className="truncate">{clk.date.split(',')[1] || clk.date}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+
       </main>
 
       {/* === MODALS OVERLAY DECK === */}
@@ -4375,6 +6382,8 @@ export default function AdminPanel({
                     <option value="Processing">3. Warehouse Packaging Completed</option>
                     <option value="Shipped">4. Shipped / Dispatch In Transit</option>
                     <option value="Delivered">5. Delivered Successfully</option>
+                    <option value="Cancelled">6. Cancelled</option>
+                    <option value="Returned">7. Returned</option>
                   </select>
                 </div>
 
@@ -4764,13 +6773,36 @@ export default function AdminPanel({
             >
               <h3 className="font-extrabold text-sm uppercase mb-4 text-slate-900">Alter Department category taxonomy</h3>
               <form onSubmit={updateCategory} className="space-y-4 text-xs">
-                <input 
-                  type="text" 
-                  className="form-input text-xs py-2.5" 
-                  required 
-                  value={editingCategory.name}
-                  onChange={(e) => setEditingCategory({ ...editingCategory, name: e.target.value })}
-                />
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Category Name</label>
+                  <input 
+                    type="text" 
+                    className="form-input text-xs py-2.5 w-full font-bold" 
+                    required 
+                    value={editingCategory.name}
+                    onChange={(e) => setEditingCategory({ ...editingCategory, name: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Upload New Photo (Image)</label>
+                  <input 
+                    type="file" 
+                    accept="image/*"
+                    onChange={handleEditCategoryImgUpload}
+                    className="block w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-extrabold file:bg-pink-50 file:text-pink-650 hover:file:bg-pink-100 cursor-pointer"
+                  />
+                </div>
+
+                <div className="flex gap-3 items-center p-2 bg-slate-50 rounded-2xl border">
+                  <div className="w-12 h-12 rounded-xl overflow-hidden bg-slate-100 border border-slate-200 shrink-0 flex items-center justify-center p-0.5">
+                    <img src={editingCategory.image || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=150&q=80'} alt="Current" className="w-full h-full object-cover rounded-lg" />
+                  </div>
+                  <div>
+                    <span className="block text-[10px] font-black text-slate-400">CURRENT IMAGE PREVIEW</span>
+                    <span className="text-[9px] text-slate-350">Updates immediately on file select</span>
+                  </div>
+                </div>
+
                 <button type="submit" className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-2.5 rounded-xl uppercase">
                   Consolidate Alteration
                 </button>
@@ -4811,10 +6843,166 @@ export default function AdminPanel({
                   <label className="form-label">Manually Override Ledger Balance (৳)</label>
                   <input type="number" className="form-input text-xs font-mono font-bold text-indigo-700" required value={editingUser.balance} onChange={(e) => setEditingUser({ ...editingUser, balance: parseInt(e.target.value) || 0 })} />
                 </div>
+                
+                <div className="form-group border-t border-slate-100 pt-3">
+                  <label className="form-label font-bold text-slate-800">Subscription Expiration Date (Meyad)</label>
+                  <p className="text-[9px] text-slate-400 mb-1 leading-none">Determine the premium reseller access ending timeline.</p>
+                  <input 
+                    type="date" 
+                    className="form-input text-xs font-mono font-bold w-full p-2 border rounded-xl bg-slate-50 border-slate-200 mt-1"
+                    value={editingUser.subscriptionExpiresAt ? editingUser.subscriptionExpiresAt.slice(0, 10) : ''} 
+                    onChange={(e) => setEditingUser({ ...editingUser, subscriptionExpiresAt: e.target.value })} 
+                  />
+                  
+                  <div className="grid grid-cols-4 gap-1 mt-2">
+                    {[
+                      { label: '+1m', m: 1 },
+                      { label: '+3m', m: 3 },
+                      { label: '+6m', m: 6 },
+                      { label: '+1y', m: 12 }
+                    ].map(pres => (
+                      <button
+                        key={pres.label}
+                        type="button"
+                        onClick={() => {
+                          const base = editingUser.subscriptionExpiresAt ? getDhakaDate(editingUser.subscriptionExpiresAt) : getDhakaDate(new Date());
+                          const current = getDhakaDate(new Date());
+                          const reference = base.getTime() < current.getTime() ? current : base;
+                          reference.setMonth(reference.getMonth() + pres.m);
+                          const y = reference.getFullYear();
+                          const month = String(reference.getMonth() + 1).padStart(2, '0');
+                          const d = String(reference.getDate()).padStart(2, '0');
+                          setEditingUser({ ...editingUser, subscriptionExpiresAt: `${y}-${month}-${d}` });
+                        }}
+                        className="bg-slate-100 hover:bg-slate-200 text-[9px] font-extrabold text-slate-700 py-1 rounded-lg transition-colors cursor-pointer text-center border border-slate-200"
+                      >
+                        {pres.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 <button type="submit" className="w-full bg-slate-905 bg-slate-900 text-white font-bold py-2.5 rounded-xl hover:bg-slate-800 uppercase shadow text-[10px] tracking-wide">
                   Enforce Balance overrides
                 </button>
               </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* 6. Custom Seller Store Stats Editor Modal */}
+      <AnimatePresence>
+        {editingSellerForStats && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }} 
+              animate={{ opacity: 1 }} 
+              exit={{ opacity: 0 }}
+              onClick={() => setEditingSellerForStats(null)}
+              className="absolute inset-0 bg-slate-900/50 backdrop-blur-xs"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.98 }} 
+              animate={{ opacity: 1, scale: 1 }} 
+              exit={{ opacity: 0, scale: 0.98 }}
+              className="bg-white rounded-3xl shadow-2xl relative w-full h-auto z-10 p-6 text-slate-800 max-w-sm max-h-[90vh] overflow-y-auto"
+            >
+              <div className="flex justify-between items-center mb-4 pb-3 border-b border-slate-100">
+                <h3 className="font-extrabold text-xs uppercase flex items-center gap-1.5 text-slate-900">
+                  <ShoppingBag className="w-4 h-4 text-pink-500" /> Edit Store Stats: {editingSellerForStats.name}
+                </h3>
+                <button onClick={() => setEditingSellerForStats(null)} className="text-slate-400 hover:text-slate-600 p-1.5 rounded-full cursor-pointer">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="space-y-4 text-xs text-slate-700">
+                <div className="space-y-1.5 text-left">
+                  <label className="text-[10px] uppercase font-bold text-slate-400 block">Positive Ratings (%)</label>
+                  <input 
+                    type="number" 
+                    min="1" 
+                    max="100"
+                    placeholder="e.g. 96"
+                    className="w-full bg-slate-50 border border-slate-200 focus:border-pink-500 rounded-xl py-2 px-3 text-xs font-semibold text-slate-800 outline-none" 
+                    value={editSellerRating}
+                    onChange={(e) => setEditSellerRating(Number(e.target.value))}
+                  />
+                  <p className="text-[9px] text-slate-400 leading-none">Positive buyer recommendations score (1% to 100%)</p>
+                </div>
+
+                <div className="space-y-1.5 text-left">
+                  <label className="text-[10px] uppercase font-bold text-slate-400 block">Store Followers Count</label>
+                  <input 
+                    type="text" 
+                    placeholder="e.g. 4.2k or 12k or 850"
+                    className="w-full bg-slate-50 border border-slate-200 focus:border-pink-500 rounded-xl py-2 px-3 text-xs font-semibold text-slate-800 outline-none" 
+                    value={editSellerFollowers}
+                    onChange={(e) => setEditSellerFollowers(e.target.value)}
+                  />
+                  <p className="text-[9px] text-slate-400 leading-none">Displays on shop profile, e.g., 2.5k, 10k, 500</p>
+                </div>
+
+                <div className="space-y-1.5 text-left">
+                  <label className="text-[10px] uppercase font-bold text-slate-400 block">Ship on Time Rate (%)</label>
+                  <input 
+                    type="number" 
+                    min="1" 
+                    max="100"
+                    placeholder="e.g. 95"
+                    className="w-full bg-slate-50 border border-slate-200 focus:border-pink-500 rounded-xl py-2 px-3 text-xs font-semibold text-slate-800 outline-none" 
+                    value={editSellerShipOnTime}
+                    onChange={(e) => setEditSellerShipOnTime(Number(e.target.value))}
+                  />
+                  <p className="text-[9px] text-slate-400 leading-none">Average shipping speed satisfaction metric (1% to 100%)</p>
+                </div>
+
+                 <div className="space-y-1.5 text-left">
+                  <p className="text-[9.5px] text-slate-450 italic">Note: Chat Response metrics configured here are hidden in the current customer interface.</p>
+                </div>
+
+                <div className="flex gap-2 pt-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUsers(prev => prev.map(u => u.id === editingSellerForStats.id ? {
+                        ...u,
+                        sellerRating: editSellerRating,
+                        sellerFollowersCount: editSellerFollowers,
+                        sellerShipOnTime: editSellerShipOnTime,
+                        sellerChatResponse: editSellerChatResponse
+                      } : u));
+                      showNotif(`Successfully updated custom stats for "${editingSellerForStats.name}"!`, "success");
+                      setEditingSellerForStats(null);
+                    }}
+                    className="flex-1 bg-pink-500 hover:bg-pink-600 text-white font-black text-xs py-2.5 rounded-xl transition-all cursor-pointer text-center border-none"
+                  >
+                    Save Custom Stats
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUsers(prev => prev.map(u => {
+                        if (u.id === editingSellerForStats.id) {
+                          const updated = { ...u };
+                          delete updated.sellerRating;
+                          delete updated.sellerFollowersCount;
+                          delete updated.sellerShipOnTime;
+                          delete updated.sellerChatResponse;
+                          return updated;
+                        }
+                        return u;
+                      }));
+                      showNotif(`Reset statistics for "${editingSellerForStats.name}" to automatic defaults!`, "success");
+                      setEditingSellerForStats(null);
+                    }}
+                    className="bg-slate-100 hover:bg-slate-200 text-slate-600 font-extrabold text-xs py-2.5 px-3 rounded-xl transition-all cursor-pointer border-none"
+                  >
+                    Reset Defaults
+                  </button>
+                </div>
+              </div>
             </motion.div>
           </div>
         )}

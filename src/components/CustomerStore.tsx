@@ -2,15 +2,18 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   ShoppingCart, Search, LogIn, LogOut, ArrowRight, ArrowLeft, UserCheck, 
-  MapPin, Phone, User, Package, Check, ChevronLeft, ChevronRight, Star, Sparkles,
-  Smartphone, Building, Mail, Clock, HelpCircle, Eye, Tag, AlertCircle, ShoppingBag, Truck, X, ShieldCheck, Menu,
-  Heart, MessageSquare, Home, Camera, Save, Edit3, Upload, Trash, Plus, Award, Layers, DollarSign, Lock, Shield, Loader2, CreditCard, CheckCircle2, MoreVertical, Info, Calendar, Instagram, Globe
+  MapPin, Phone, User as UserIcon, Package, Check, ChevronLeft, ChevronRight, Star, Sparkles,
+  Smartphone, Building, Mail, Clock, HelpCircle, Eye, EyeOff, Tag, AlertCircle, ShoppingBag, Truck, X, ShieldCheck, Menu,
+  Heart, MessageSquare, Home, Camera, Save, Edit3, Upload, Trash, Plus, Award, Layers, DollarSign, Lock, Shield, Loader2, CreditCard, CheckCircle2, MoreVertical, Info, Calendar, Instagram, Globe, Users, Store
 } from 'lucide-react';
-import { Product, Category, Order, OrderStatus, Banner, SellerApp, Customer, SpecialOffer, DeliveryCharge, FooterConfig, PopupImage, ResellerPageConfig, ResellerSubscriptionOption, ResellerFAQ, ResellerBenefitCard, AdvanceConfig, PromoCode, FlashOfferSetting } from '../types';
+import { User, Product, Category, Order, OrderStatus, Banner, SellerApp, Customer, SpecialOffer, DeliveryCharge, FooterConfig, PopupImage, ResellerPageConfig, ResellerSubscriptionOption, ResellerFAQ, ResellerBenefitCard, AdvanceConfig, PromoCode, FlashOfferSetting, AffiliateTask, AffiliateSubmission, AffiliateAccount } from '../types';
 import OrderTracker from './OrderTracker';
 import { generateTrackingId, createInitialTimeline } from '../data';
+import { getDhakaDate, formatToDhakaTime, formatToDhakaDateOnly } from '../dateUtils';
 
 interface CustomerStoreProps {
+  users: User[];
+  setUsers?: React.Dispatch<React.SetStateAction<User[]>>;
   products: Product[];
   categories: Category[];
   orders: Order[];
@@ -40,6 +43,16 @@ interface CustomerStoreProps {
   setPromoCodes: React.Dispatch<React.SetStateAction<PromoCode[]>>;
   flashOfferSettings?: FlashOfferSetting[];
   setFlashOfferSettings?: React.Dispatch<React.SetStateAction<FlashOfferSetting[]>>;
+
+  affiliateRatePerClick: number;
+  affiliateMinWithdrawal: number;
+  affiliateTasks: AffiliateTask[];
+  affiliateSubmissions: AffiliateSubmission[];
+  setAffiliateSubmissions: React.Dispatch<React.SetStateAction<AffiliateSubmission[]>>;
+  affiliateAccounts: AffiliateAccount[];
+  setAffiliateAccounts: React.Dispatch<React.SetStateAction<AffiliateAccount[]>>;
+  lang?: 'en' | 'bn';
+  setLang?: React.Dispatch<React.SetStateAction<'en' | 'bn'>>;
 }
 
 const getCategoryIcon = (catId: string) => {
@@ -450,7 +463,7 @@ const SslPaymentPortal: React.FC<SslPaymentPortalProps> = ({ amount, onCancel, o
             <span className="font-black text-slate-705 text-slate-700 uppercase tracking-widest block border-b pb-1 mb-1">Receipt details</span>
             <div>Payee: <b className="text-slate-800">Dealy Ltd Reseller Program</b></div>
             <div>Reference: <b className="text-slate-800 font-mono font-sans">RES_{phone}</b></div>
-            <div>Time: <b className="text-slate-805 text-slate-800 font-mono font-sans">{new Date().toLocaleString()}</b></div>
+            <div>Time: <b className="text-slate-805 text-slate-800 font-mono font-sans">{formatToDhakaTime()}</b></div>
           </div>
 
           <button
@@ -467,6 +480,8 @@ const SslPaymentPortal: React.FC<SslPaymentPortalProps> = ({ amount, onCancel, o
 };
 
 export default function CustomerStore({
+  users = [],
+  setUsers,
   products: rawProducts,
   categories,
   orders,
@@ -495,6 +510,15 @@ export default function CustomerStore({
   promoCodes,
   setPromoCodes,
   flashOfferSettings = [],
+  affiliateRatePerClick,
+  affiliateMinWithdrawal,
+  affiliateTasks,
+  affiliateSubmissions,
+  setAffiliateSubmissions,
+  affiliateAccounts,
+  setAffiliateAccounts,
+  lang: propLang,
+  setLang: propSetLang,
 }: CustomerStoreProps) {
   const [rawCart, setCart] = useState<{ product: Product; qty: number; color: string; cartId: string }[]>(() => {
     try {
@@ -514,16 +538,20 @@ export default function CustomerStore({
     return flashOfferSettings.some(item => item.isActive && item.type === 'free_delivery');
   }, [flashOfferSettings]);
 
+  const approvedRawProducts = useMemo(() => {
+    return rawProducts.filter(p => !p.sellerId || p.approvalStatus === 'approved');
+  }, [rawProducts]);
+
   // Memoize mapped products with active flash discounts applied dynamically
   const mappedProducts = useMemo(() => {
     const discountSetting = flashOfferSettings.find(s => s.isActive && s.type === 'discount');
-    if (!discountSetting) return rawProducts;
+    if (!discountSetting) return approvedRawProducts;
 
     const match = discountSetting.value.match(/(\d+)/);
     const pct = match ? parseInt(match[1], 10) : 0;
-    if (pct <= 0) return rawProducts;
+    if (pct <= 0) return approvedRawProducts;
 
-    return rawProducts.map(p => {
+    return approvedRawProducts.map(p => {
       if (p.isFlash) {
         const discountAmt = Math.round((p.discountPrice * pct) / 100);
         return {
@@ -533,7 +561,7 @@ export default function CustomerStore({
       }
       return p;
     });
-  }, [rawProducts, flashOfferSettings]);
+  }, [approvedRawProducts, flashOfferSettings]);
 
   const products = mappedProducts;
 
@@ -557,7 +585,145 @@ export default function CustomerStore({
   const [selectedCat, setSelectedCat] = useState<string | null>(null);
   const [selectedOffer, setSelectedOffer] = useState<SpecialOffer | null>(null);
   const [searchInput, setSearchInput] = useState('');
+  const [searchFocusedInput, setSearchFocusedInput] = useState<'mobile' | 'desktop' | 'shop' | null>(null);
+
+  // Dynamic search suggestions generated from our products and category names
+  const searchSuggestions = useMemo(() => {
+    const trimmedInput = searchInput.trim().toLowerCase();
+    if (!trimmedInput) return [];
+
+    const suggestionsSet = new Set<string>();
+
+    // 1. Suggest category names if they match
+    categories.forEach(cat => {
+      if (cat.name.toLowerCase().includes(trimmedInput)) {
+        suggestionsSet.add(cat.name);
+      }
+    });
+
+    // 2. Suggest product names if they match
+    products.forEach(p => {
+      if (p.name.toLowerCase().includes(trimmedInput)) {
+        suggestionsSet.add(p.name);
+      }
+    });
+
+    return Array.from(suggestionsSet).slice(0, 8); // Limits suggestions like Google/Daraz to top 8 items
+  }, [searchInput, products, categories]);
+
+  const handleSelectSuggestion = (sug: string) => {
+    setSearchInput(sug);
+    setSearchFocusedInput(null);
+    setViewingProduct(null);
+    setShowCustProfilePage(false);
+    setSelectedOffer(null);
+    setShowOnlyFavorites(false);
+    setEditingCustomerOrder(null);
+    setSelectedCat(null);
+    setShowCartPage(false);
+    setShowSupportPage(false);
+    
+    // Reset pages & activate search results
+    setShowShopPage(false);
+    setShowSearchResultsPage(true);
+    setSearchQuery(sug);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const renderSuggestionsDropdown = (type: 'mobile' | 'desktop' | 'shop') => {
+    if (searchFocusedInput !== type || searchSuggestions.length === 0) return null;
+
+    return (
+      <div 
+        id={`search-suggestions-${type}`}
+        className="absolute left-0 right-0 top-full mt-1.5 bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden z-[999] max-h-60 overflow-y-auto animate-fade-in font-sans"
+      >
+        <div className="py-1">
+          {searchSuggestions.map((sug, i) => {
+            const idx = sug.toLowerCase().indexOf(searchInput.toLowerCase());
+            const hasMatch = idx !== -1;
+            
+            const before = hasMatch ? sug.substring(0, idx) : sug;
+            const match = hasMatch ? sug.substring(idx, idx + searchInput.length) : '';
+            const after = hasMatch ? sug.substring(idx + searchInput.length) : '';
+
+            return (
+              <button
+                key={i}
+                type="button"
+                onMouseDown={() => {
+                  handleSelectSuggestion(sug);
+                }}
+                className="w-full text-left px-3.5 py-2 hover:bg-slate-50 transition-colors flex items-center gap-2.5 cursor-pointer text-xs group"
+              >
+                <Search className="w-3.5 h-3.5 text-slate-400 group-hover:text-pink-600 transition-colors shrink-0" />
+                <span className="text-slate-700 truncate font-semibold">
+                  {before}
+                  <span className="text-pink-600 font-extrabold">{match}</span>
+                  {after}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
   const [currentBanner, setCurrentBanner] = useState(0);
+
+  // Swipe and Drag gesture states for Banner Carousel
+  const [bannerTouchStart, setBannerTouchStart] = useState<number | null>(null);
+  const [bannerTouchEnd, setBannerTouchEnd] = useState<number | null>(null);
+  const [bannerMouseDownX, setBannerMouseDownX] = useState<number | null>(null);
+  const [isBannerDragging, setIsBannerDragging] = useState(false);
+
+  const handleBannerTouchStart = (e: React.TouchEvent) => {
+    setBannerTouchStart(e.targetTouches[0].clientX);
+    setBannerTouchEnd(e.targetTouches[0].clientX);
+  };
+
+  const handleBannerTouchMove = (e: React.TouchEvent) => {
+    setBannerTouchEnd(e.targetTouches[0].clientX);
+  };
+
+  const handleBannerTouchEnd = () => {
+    if (bannerTouchStart === null || bannerTouchEnd === null) return;
+    const distance = bannerTouchStart - bannerTouchEnd;
+    const thresh = 40; // minimum distance in px to register as slide step
+    if (distance > thresh) {
+      // Swiped left -> show next slide
+      setCurrentBanner(prev => (prev + 1) % activeBanners.length);
+    } else if (distance < -thresh) {
+      // Swiped right -> show previous slide
+      setCurrentBanner(prev => (prev - 1 + activeBanners.length) % activeBanners.length);
+    }
+    setBannerTouchStart(null);
+    setBannerTouchEnd(null);
+  };
+
+  const handleBannerMouseDown = (e: React.MouseEvent) => {
+    setBannerMouseDownX(e.clientX);
+    setIsBannerDragging(true);
+  };
+
+  const handleBannerMouseUp = (e: React.MouseEvent) => {
+    if (!isBannerDragging || bannerMouseDownX === null) return;
+    const distance = bannerMouseDownX - e.clientX;
+    const thresh = 40;
+    if (distance > thresh) {
+      setCurrentBanner(prev => (prev + 1) % activeBanners.length);
+    } else if (distance < -thresh) {
+      setCurrentBanner(prev => (prev - 1 + activeBanners.length) % activeBanners.length);
+    }
+    setBannerMouseDownX(null);
+    setIsBannerDragging(false);
+  };
+
+  const handleBannerMouseLeave = () => {
+    setBannerMouseDownX(null);
+    setIsBannerDragging(false);
+  };
+
   const [viewingProduct, setViewingProduct] = useState<Product | null>(null);
   const [lastActiveView, setLastActiveView] = useState<{
     showCustProfilePage: boolean;
@@ -620,9 +786,91 @@ export default function CustomerStore({
   const [showOnlyFavorites, setShowOnlyFavorites] = useState(false);
   const [showSupportModal, setShowSupportModal] = useState(false);
 
+  const parsedRefFlag = React.useRef(false);
+
+  useEffect(() => {
+    if (parsedRefFlag.current) return;
+    const params = new URLSearchParams(window.location.search);
+    const referrerPhone = params.get('ref');
+    if (referrerPhone && affiliateAccounts?.length > 0) {
+      parsedRefFlag.current = true;
+      let deviceIp = localStorage.getItem('orivian_affiliate_device_ip');
+      if (!deviceIp) {
+        const genIp = `103.${Math.floor(Math.random() * 254) + 1}.${Math.floor(Math.random() * 254) + 1}.${Math.floor(Math.random() * 254) + 1}`;
+        localStorage.setItem('orivian_affiliate_device_ip', genIp);
+        deviceIp = genIp;
+      }
+
+      const referrerAccount = affiliateAccounts.find(a => a.phone === referrerPhone);
+      if (referrerAccount) {
+        const clicks = referrerAccount.clicksList || [];
+        const isDuplicateIp = clicks.some(c => c.ip === deviceIp);
+
+        if (!isDuplicateIp) {
+          setAffiliateAccounts(prev => prev.map(acc => {
+            if (acc.phone === referrerPhone) {
+              const updatedClicks = [...(acc.clicksList || []), { ip: deviceIp!, date: formatToDhakaTime() }];
+              return {
+                ...acc,
+                clicksCount: updatedClicks.length,
+                clicksList: updatedClicks,
+                balance: acc.balance + affiliateRatePerClick
+              };
+            }
+            return acc;
+          }));
+
+          showNotif(`You visited via a referral link! Credited partner ${referrerAccount.name}.`, 'success');
+        } else {
+          console.log("Duplicate reference click detected from IP: " + deviceIp);
+        }
+      }
+
+      try {
+        const cleanUrl = window.location.protocol + "//" + window.location.host + window.location.pathname;
+        window.history.replaceState({ path: cleanUrl }, '', cleanUrl);
+      } catch (err) {
+        console.error("Could not cleanse address URL", err);
+      }
+    }
+  }, [affiliateAccounts, affiliateRatePerClick]);
+
   useEffect(() => {
     setActiveDetailImage(null);
   }, [viewingProduct]);
+
+  useEffect(() => {
+    if (loggedCustomer) {
+      const fresh = affiliateAccounts.find(a => a.phone === loggedCustomer.phone);
+      if (fresh) {
+        if (!loggedAffiliate || loggedAffiliate.phone !== fresh.phone) {
+          setLoggedAffiliate(fresh);
+        }
+      } else {
+        // Create affiliate account automatically from customer account
+        const nextAccount: AffiliateAccount = {
+          phone: loggedCustomer.phone,
+          name: loggedCustomer.name,
+          password: '1234',
+          balance: 0,
+          clicksCount: 0,
+          clicksList: [],
+          withdrawals: []
+        };
+        setAffiliateAccounts(prev => {
+          if (prev.some(a => a.phone === loggedCustomer.phone)) {
+            return prev;
+          }
+          return [...prev, nextAccount];
+        });
+        setLoggedAffiliate(nextAccount);
+      }
+    } else {
+      if (loggedAffiliate) {
+        setLoggedAffiliate(null);
+      }
+    }
+  }, [loggedCustomer, affiliateAccounts]);
 
   // Modals state
   const [showAuthModal, setShowAuthModal] = useState(false);
@@ -633,7 +881,35 @@ export default function CustomerStore({
   const [showCartPage, setShowCartPage] = useState(false);
   const [showSupportPage, setShowSupportPage] = useState(false);
   const [showMyOrdersPage, setShowMyOrdersPage] = useState(false);
+  const [showAffiliatePage, setShowAffiliatePage] = useState(false);
+
+  // Affiliate session states
+  const [loggedAffiliate, setLoggedAffiliate] = useState<AffiliateAccount | null>(null);
+  const [affRegName, setAffRegName] = useState('');
+  const [affRegPhone, setAffRegPhone] = useState('');
+  const [affRegPass, setAffRegPass] = useState('');
+  const [affLogPhone, setAffLogPhone] = useState('');
+  const [affLogPass, setAffLogPass] = useState('');
+  const [proofTaskId, setProofTaskId] = useState<string | null>(null);
+  const [proofText, setProofText] = useState('');
+  const [proofSubmitLink, setProofSubmitLink] = useState('');
+  const [proofSubmitScreenshot, setProofSubmitScreenshot] = useState('');
+  const [showPayoutModal, setShowPayoutModal] = useState(false);
+  const [showProofSubmitModal, setShowProofSubmitModal] = useState(false);
+  const [affWdAmount, setAffWdAmount] = useState<number>(50);
+  const [affWdMethod, setAffWdMethod] = useState<'bKash' | 'Nagad' | 'Rocket'>('bKash');
+  const [affWdAccount, setAffWdAccount] = useState('');
   const [isCheckingOut, setIsCheckingOut] = useState(false);
+  const [directBuyItem, setDirectBuyItem] = useState<{ product: Product; qty: number; color: string; cartId: string } | null>(null);
+  const [isDirectBuyActive, setIsDirectBuyActive] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (!isCheckingOut && !showCartModal) {
+      setIsDirectBuyActive(false);
+      setDirectBuyItem(null);
+    }
+  }, [isCheckingOut, showCartModal]);
+
   const [orderIdToCancel, setOrderIdToCancel] = useState<string | null>(null);
   const [orderIdToDeliver, setOrderIdToDeliver] = useState<string | null>(null);
   const [showTrackerModal, setShowTrackerModal] = useState(false);
@@ -648,9 +924,34 @@ export default function CustomerStore({
   // Promo code customer states
   const [promoCodeInput, setPromoCodeInput] = useState('');
   const [appliedPromo, setAppliedPromo] = useState<PromoCode | null>(null);
+  const [useAffiliateBalance, setUseAffiliateBalance] = useState(false);
+
+  // Subscription Payment Interactive States
+  const [selectedSubPackage, setSelectedSubPackage] = useState<ResellerSubscriptionOption | null>(null);
+  const [subPaymentMethod, setSubPaymentMethod] = useState<'bKash' | 'Nagad' | 'Rocket' | 'Bank' | ''>('');
+  const [subTrxId, setSubTrxId] = useState('');
+  const [isSubSuccess, setIsSubSuccess] = useState(false);
+
+  // Subscription Multi-step & Registration States
+  const [subStep, setSubStep] = useState<number>(1); // 1 = Registration details, 2 = Payment details
+  const [subRegName, setSubRegName] = useState('');
+  const [subRegEmail, setSubRegEmail] = useState('');
+  const [subRegPhone, setSubRegPhone] = useState('');
+  const [subRegAddress, setSubRegAddress] = useState('');
+  const [subRegBusinessName, setSubRegBusinessName] = useState('');
+  const [subRegPassword, setSubRegPassword] = useState('');
+  const [showSubRegPass, setShowSubRegPass] = useState(false);
+  const [showCustLoginPass, setShowCustLoginPass] = useState(false);
+  const [showCustRegPass, setShowCustRegPass] = useState(false);
+
+  // Reseller registration success states
+  const [isResellerRegSuccess, setIsResellerRegSuccess] = useState(false);
+  const [lastSubmittedSeller, setLastSubmittedSeller] = useState<{ name: string; phone: string; details: string } | null>(null);
 
   // Language & SSL payment gateway states
-  const [lang, setLang] = useState<'en' | 'bn'>('en');
+  const [internalLang, setInternalLang] = useState<'en' | 'bn'>('en');
+  const lang = propLang || internalLang;
+  const setLang = propSetLang || setInternalLang;
   const [showSslGateway, setShowSslGateway] = useState(false);
   const [sslPaymentData, setSslPaymentData] = useState<{
     amount: number;
@@ -781,6 +1082,7 @@ export default function CustomerStore({
   const [profileAddress, setProfileAddress] = useState('');
   const [profileAvatar, setProfileAvatar] = useState('');
   const [activeProfileTab, setActiveProfileTab] = useState<'to_pay' | 'to_ship' | 'received' | 'cancelled'>('to_pay');
+  const [orderActiveTab, setOrderActiveTab] = useState<'all' | 'placed' | 'to_ship' | 'received' | 'cancelled' | 'returned'>('all');
   const [showShopPage, setShowShopPage] = useState(false);
   const [showAllFlashOffers, setShowAllFlashOffers] = useState(false);
   const [showSearchResultsPage, setShowSearchResultsPage] = useState(false);
@@ -789,6 +1091,68 @@ export default function CustomerStore({
   const [showResellerLandingPage, setShowResellerLandingPage] = useState(false);
   const [expandedFaqId, setExpandedFaqId] = useState<string | null>(null);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
+  const [viewingCustomDocs, setViewingCustomDocs] = useState<{ title: string; content: string } | null>(null);
+
+  // Seller store view states
+  const [selectedStoreSellerName, setSelectedStoreSellerName] = useState<string | null>(null);
+  const [selectedStoreSellerId, setSelectedStoreSellerId] = useState<string | null>(null);
+  const [storeSearchQuery, setStoreSearchQuery] = useState('');
+  const [storeFollowers, setStoreFollowers] = useState<string[]>([]);
+
+  // Realistic matching stats for each store (deterministic or custom-edited)
+  const getSellerStats = (sellerName: string) => {
+    const matchedSeller = users?.find(u => u.role === 'seller' && (u.name === sellerName || u.kyc?.nidName === sellerName));
+
+    let hash = 0;
+    const nameToHash = sellerName || 'Orivian Official Store';
+    for (let i = 0; i < nameToHash.length; i++) {
+      hash = nameToHash.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    const rawRating = 82 + Math.abs(hash % 16); // 82% to 98%
+    const defaultRating = Math.min(rawRating, 98);
+    const defaultShipOnTime = 92 + Math.abs((hash >> 2) % 9); // 92% to 100%
+    const defaultChatResponse = 85 + Math.abs((hash >> 4) % 15); // 85% to 105%
+    const followersVal = ((10 + Math.abs((hash >> 1) % 45)) / 10); // 1.0k to 5.5k
+    const defaultFollowersStr = followersVal.toFixed(1) + 'k';
+
+    const rating = matchedSeller?.sellerRating !== undefined ? matchedSeller.sellerRating : defaultRating;
+    const shipOnTime = matchedSeller?.sellerShipOnTime !== undefined ? matchedSeller.sellerShipOnTime : defaultShipOnTime;
+    const chatResponse = matchedSeller?.sellerChatResponse !== undefined ? matchedSeller.sellerChatResponse : defaultChatResponse;
+    const baseFollowersStr = matchedSeller?.sellerFollowersCount !== undefined ? matchedSeller.sellerFollowersCount : defaultFollowersStr;
+
+    // Helper functions to parse and format followers
+    const parseFollowers = (str: string): number => {
+      const cleaned = str.trim().toLowerCase();
+      if (cleaned.endsWith('k')) {
+        const numVal = parseFloat(cleaned.replace('k', ''));
+        return isNaN(numVal) ? 0 : Math.round(numVal * 1000);
+      }
+      const numVal = parseInt(cleaned, 10);
+      return isNaN(numVal) ? 0 : numVal;
+    };
+
+    const formatFollowers = (num: number): string => {
+      if (num >= 1000) {
+        if (num % 1000 === 0) {
+          return (num / 1000).toFixed(0) + 'k';
+        }
+        return (num / 1000).toFixed(1) + 'k';
+      }
+      return num.toString();
+    };
+
+    const baseCount = parseFollowers(baseFollowersStr);
+    const extraCount = matchedSeller?.sellerFollowersList?.length || 0;
+    const followersStr = formatFollowers(Math.max(0, baseCount + extraCount));
+
+    return {
+      rating,
+      shipOnTime,
+      chatResponse,
+      followersStr,
+      level: rating >= 92 ? 'Excellent' : rating >= 85 ? 'High' : 'Medium'
+    };
+  };
 
   const openResellerLandingPage = () => {
     setViewingProduct(null);
@@ -930,17 +1294,89 @@ export default function CustomerStore({
     setIsCheckingOut(false);
     setShowResellerLandingPage(false);
     setShowMyOrdersPage(false);
+    setShowAffiliatePage(false);
+    setSelectedStoreSellerName(null);
+    setSelectedStoreSellerId(null);
+    setStoreSearchQuery('');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const myOrders = orders.filter(o => loggedCustomer && o.custPhone === loggedCustomer.phone);
+  const handleVisitStore = (sellerName: string, sellerId: string | null) => {
+    setViewingProduct(null);
+    setLastActiveView(null);
+    setSelectedOffer(null);
+    setSelectedCat(null);
+    setSearchInput('');
+    setSearchQuery('');
+    setShowCustProfilePage(false);
+    setShowOnlyFavorites(false);
+    setShowCartPage(false);
+    setShowSupportPage(false);
+    setShowShopPage(false);
+    setShowAllFlashOffers(false);
+    setShowSearchResultsPage(false);
+    setShowStatement(false);
+    setIsCheckingOut(false);
+    setShowResellerLandingPage(false);
+    setShowMyOrdersPage(false);
+    setShowAffiliatePage(false);
+    
+    setSelectedStoreSellerName(sellerName);
+    setSelectedStoreSellerId(sellerId);
+    setStoreSearchQuery('');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const openAffiliatePage = () => {
+    setViewingProduct(null);
+    setLastActiveView(null);
+    setSelectedOffer(null);
+    setSelectedCat(null);
+    setSearchInput('');
+    setSearchQuery('');
+    setShowCustProfilePage(false);
+    setShowOnlyFavorites(false);
+    setShowCartPage(false);
+    setShowSupportPage(false);
+    setShowShopPage(false);
+    setShowAllFlashOffers(false);
+    setShowSearchResultsPage(false);
+    setShowStatement(false);
+    setIsCheckingOut(false);
+    setShowResellerLandingPage(false);
+    setShowMyOrdersPage(false);
+    setShowAffiliatePage(true);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const myOrders = orders
+    .filter(o => loggedCustomer && o.custPhone === loggedCustomer.phone)
+    .sort((a, b) => {
+      const aTimeStr = a.id.replace('o_demo', '').replace('o_', '');
+      const bTimeStr = b.id.replace('o_demo', '').replace('o_', '');
+      const aTimeNum = parseInt(aTimeStr, 10);
+      const bTimeNum = parseInt(bTimeStr, 10);
+      if (!isNaN(aTimeNum) && !isNaN(bTimeNum)) {
+        return bTimeNum - aTimeNum;
+      }
+      const aDate = Date.parse(a.date);
+      const bDate = Date.parse(b.date);
+      if (!isNaN(aDate) && !isNaN(bDate) && aDate !== bDate) {
+        return bDate - aDate;
+      }
+      return b.id.localeCompare(a.id);
+    });
+  const deliveredOrders = myOrders.filter(o => o.status === 'Delivered');
+  const totalPurchasesAmount = deliveredOrders.reduce((sum, o) => sum + o.amount, 0);
+  const totalPurchasesCount = deliveredOrders.length;
+  const myTeam = loggedAffiliate?.team || [];
 
   // Input states
   const [loginData, setLoginData] = useState({ phone: '', pass: '' });
   const [regData, setRegData] = useState({ name: '', phone: '', address: '', pass: '' });
-  const [sellerData, setSellerData] = useState({ name: '', phone: '', details: '' });
+  const [sellerData, setSellerData] = useState({ name: '', phone: '', details: '', referredByCode: '' });
   const [guestDetails, setGuestDetails] = useState({ name: '', phone: '', address: '' });
-  const [checkoutPaymentMethod, setCheckoutPaymentMethod] = useState<'COD' | 'bKash' | 'Nagad' | 'Rocket' | 'Bank'>('COD');
+  const [checkoutPaymentMethod, setCheckoutPaymentMethod] = useState<'COD' | 'bKash' | 'Nagad' | 'Rocket' | 'Bank' | 'Card'>('COD');
   const [checkoutTxId, setCheckoutTxId] = useState('');
   const [checkoutSenderNo, setCheckoutSenderNo] = useState('');
   const [useProfileInfo, setUseProfileInfo] = useState(true);
@@ -950,6 +1386,19 @@ export default function CustomerStore({
   const currentName = isProfileMode ? (profileName || loggedCustomer?.name || '') : guestDetails.name;
   const currentPhone = isProfileMode ? (profilePhone || loggedCustomer?.phone || '') : guestDetails.phone;
   const currentAddress = isProfileMode ? (profileAddress || loggedCustomer?.address || '') : guestDetails.address;
+
+  // Auto-detect referral code from share link URL query parameter
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const refParam = params.get('ref') || params.get('referredBy') || params.get('referredByCode');
+    if (refParam) {
+      setSellerData(prev => ({
+        ...prev,
+        referredByCode: refParam.trim()
+      }));
+      showNotif(`Referral RES Code captured: ${refParam}!`, 'success');
+    }
+  }, []);
 
   const handleToggleUseProfileInfo = (checked: boolean) => {
     setUseProfileInfo(checked);
@@ -1034,14 +1483,32 @@ export default function CustomerStore({
 
   const updateCartQty = (cartId: string, value: number) => {
     if (value <= 0) {
-      setCart((prev) => prev.filter((i) => i.cartId !== cartId));
+      if (isDirectBuyActive && directBuyItem && directBuyItem.cartId === cartId) {
+        setIsDirectBuyActive(false);
+        setDirectBuyItem(null);
+        setShowCartModal(false);
+        setIsCheckingOut(false);
+      } else {
+        setCart((prev) => prev.filter((i) => i.cartId !== cartId));
+      }
     } else {
-      setCart((prev) => prev.map((i) => (i.cartId === cartId ? { ...i, qty: value } : i)));
+      if (isDirectBuyActive && directBuyItem && directBuyItem.cartId === cartId) {
+        setDirectBuyItem({ ...directBuyItem, qty: value });
+      } else {
+        setCart((prev) => prev.map((i) => (i.cartId === cartId ? { ...i, qty: value } : i)));
+      }
     }
   };
 
   const removeFromCart = (cartId: string) => {
-    setCart((prev) => prev.filter((i) => i.cartId !== cartId));
+    if (isDirectBuyActive && directBuyItem && directBuyItem.cartId === cartId) {
+      setIsDirectBuyActive(false);
+      setDirectBuyItem(null);
+      setShowCartModal(false);
+      setIsCheckingOut(false);
+    } else {
+      setCart((prev) => prev.filter((i) => i.cartId !== cartId));
+    }
   };
 
   // Checkout handling
@@ -1111,8 +1578,18 @@ export default function CustomerStore({
       }
     }
 
-    const orderDateStr = new Date().toLocaleString();
+    const orderDateStr = formatToDhakaTime();
     const districtCombinedAddress = orderDetailsObj.custAddress + (matchedDistrict ? ` [District: ${matchedDistrict.district}, Delivery: ৳${deliveryCostAmount}]` : '');
+
+    // Compute affiliate balance usage and discount
+    const totalBeforeAffiliate = Math.max(0, totalAmount - promoDiscount) + deliveryCostAmount;
+    const cleanPhoneForAffiliate = currentPhone.trim();
+    const activeAffiliateAccount = affiliateAccounts.find(acc => acc.phone === cleanPhoneForAffiliate);
+    const availableAffBalance = activeAffiliateAccount ? activeAffiliateAccount.balance : 0;
+    
+    const finalAffiliateDiscountSpent = (useAffiliateBalance && availableAffBalance > 0)
+      ? Math.min(totalBeforeAffiliate, availableAffBalance)
+      : 0;
 
     // Split into individual orders for each selected item in the cart
     const newOrders: Order[] = selectedCartItems.map((item, idx) => {
@@ -1128,7 +1605,17 @@ export default function CustomerStore({
       // Delivery cost is added ONLY to the first item of the split order
       const itemDeliveryCost = idx === 0 ? deliveryCostAmount : 0;
       
-      const itemAmount = itemFinalProductTotal + itemDeliveryCost;
+      // Proportional affiliate discount (rounded)
+      const itemAffiliateDiscount = finalAffiliateDiscountSpent > 0 
+        ? (idx === selectedCartItems.length - 1 
+            ? finalAffiliateDiscountSpent - selectedCartItems.slice(0, -1).reduce((sum, _, prevIdx) => {
+                const prevItemTotal = selectedCartItems[prevIdx].product.discountPrice * selectedCartItems[prevIdx].qty;
+                return sum + Math.round((prevItemTotal / totalAmount) * finalAffiliateDiscountSpent);
+              }, 0)
+            : Math.round((itemTotal / totalAmount) * finalAffiliateDiscountSpent))
+        : 0;
+
+      const itemAmount = Math.max(0, itemFinalProductTotal + itemDeliveryCost - itemAffiliateDiscount);
       
       // Advance Paid: distribute proportionally across items
       const itemAdvancePaid = totalAdvanceRequired > 0 
@@ -1150,7 +1637,7 @@ export default function CustomerStore({
         prodImg: item.product.img,
         qty: item.qty,
         color: item.color,
-        sellRate: itemFinalProductTotal + itemDeliveryCost,
+        sellRate: itemAmount,
         profit: 0, // Direct customer purchases hold zero reseller profit margins
         amount: itemAmount,
         ...orderDetailsObj,
@@ -1160,11 +1647,44 @@ export default function CustomerStore({
         timeline: createInitialTimeline(orderDateStr),
         advancePaid: itemAdvancePaid > 0 ? itemAdvancePaid : 0,
         txId: totalAdvanceRequired > 0 ? checkoutTxId.trim() : '',
-        paymentMethod: totalAdvanceRequired > 0 ? checkoutPaymentMethod : 'COD'
+        paymentMethod: totalAdvanceRequired > 0 ? checkoutPaymentMethod : 'COD',
+        productId: item.product.id,
+        sellerId: item.product.sellerId,
+        sellerName: item.product.sellerName,
+        originalPrice: itemTotal,
+        promoDiscountApplied: itemPromoDiscount,
+        promoCodeUsed: appliedPromo ? appliedPromo.code : undefined,
+        affiliateDiscountApplied: itemAffiliateDiscount,
+        shippingChargeApplied: itemDeliveryCost
       };
     });
 
-    setOrders((prev) => [...prev, ...newOrders]);
+    if (finalAffiliateDiscountSpent > 0 && activeAffiliateAccount) {
+      setAffiliateAccounts(prev => prev.map(acc => {
+        if (acc.phone === activeAffiliateAccount.phone) {
+          const updatedWithdrawals = acc.withdrawals ? [...acc.withdrawals] : [];
+          return {
+            ...acc,
+            balance: Math.max(0, acc.balance - finalAffiliateDiscountSpent),
+            withdrawals: [
+              ...updatedWithdrawals,
+              {
+                id: `aff_wd_${Date.now()}`,
+                amount: finalAffiliateDiscountSpent,
+                method: 'Purchased Items (Order Discount)',
+                number: activeAffiliateAccount.phone,
+                status: 'approved',
+                date: formatToDhakaDateOnly()
+              }
+            ]
+          };
+        }
+        return acc;
+      }));
+      setUseAffiliateBalance(false);
+    }
+
+    setOrders((prev) => [...newOrders, ...prev]);
     
     // Increment promo usage counter if applicable
     if (appliedPromo) {
@@ -1173,9 +1693,14 @@ export default function CustomerStore({
       setPromoCodeInput('');
     }
 
-    // Remove only the selected items from the cart
-    setCart((prev) => prev.filter((item) => !selectedCartIds.includes(item.cartId)));
-    setSelectedCartIds([]);
+    // Remove only the selected items from the cart if not a direct buy
+    if (isDirectBuyActive) {
+      setIsDirectBuyActive(false);
+      setDirectBuyItem(null);
+    } else {
+      setCart((prev) => prev.filter((item) => !selectedCartIds.includes(item.cartId)));
+      setSelectedCartIds([]);
+    }
     
     setGuestDetails({ name: '', phone: '', address: '' });
     setCheckoutPaymentMethod('COD');
@@ -1236,27 +1761,37 @@ export default function CustomerStore({
       return;
     }
 
-    // Set up SSL payment details and open sandbox gateway
-    setSslPaymentData({
-      amount: 100,
-      title: "Reseller Sales Partner ID Activation",
-      onSuccess: () => {
-        const newApp: SellerApp = {
-          id: 'app_' + Date.now(),
-          name: sellerData.name.trim(),
-          phone: sellerData.phone.trim(),
-          details: sellerData.details.trim(),
-          status: 'pending',
-          date: new Date().toLocaleDateString()
-        };
-        setSellerApps((prev) => [...prev, newApp]);
-        setSellerData({ name: '', phone: '', details: '' });
-        setShowSellerModal(false);
-        setShowResellerLandingPage(false);
-        showNotif("SSL Gateway Payment Success! Your Reseller account application is active & pending review.", "success");
+    const refCode = sellerData.referredByCode.trim().toUpperCase();
+    if (refCode) {
+      const parentExists = users.some(u => u.idCode.toUpperCase() === refCode || u.phone === refCode);
+      if (!parentExists) {
+        showNotif("ভুল রেফারেল কোড! দয়া করে সঠিক কোড দিন অথবা খালি রাখুন। (Invalid Referral Code)", "error");
+        return;
       }
-    });
-    setShowSslGateway(true);
+    }
+
+    const sellerInfo = {
+      name: sellerData.name.trim(),
+      phone: sellerData.phone.trim(),
+      details: sellerData.details.trim(),
+      referredByCode: refCode || undefined
+    };
+
+    const newApp: SellerApp = {
+      id: 'app_' + Date.now(),
+      name: sellerInfo.name,
+      phone: sellerInfo.phone,
+      details: sellerInfo.details,
+      status: 'pending',
+      date: formatToDhakaDateOnly(),
+      referredByCode: refCode || undefined
+    };
+
+    setSellerApps((prev) => [...prev, newApp]);
+    setLastSubmittedSeller(sellerInfo);
+    setIsResellerRegSuccess(true);
+    setSellerData({ name: '', phone: '', details: '', referredByCode: '' });
+    showNotif("Your Reseller account application is active & pending review. Please verify via WhatsApp.", "success");
   };
 
   const handleTrackQuickSearch = (tId: string) => {
@@ -1299,7 +1834,9 @@ export default function CustomerStore({
   };
 
   const cartItemsCount = cart.reduce((s, i) => s + i.qty, 0);
-  const selectedCartItems = cart.filter(item => selectedCartIds.includes(item.cartId));
+  const selectedCartItems = isDirectBuyActive && directBuyItem 
+    ? [directBuyItem] 
+    : cart.filter(item => selectedCartIds.includes(item.cartId));
   const cartSubtotal = selectedCartItems.reduce((s, i) => s + i.product.discountPrice * i.qty, 0);
   const matchedCheckoutDistrict = deliveryCharges.find(dc => dc.id === checkoutDistrictId);
   const isFreeDeliveryApplied = isFreeDeliveryActive && selectedCartItems.some(item => item.product.isFlash);
@@ -1314,6 +1851,40 @@ export default function CustomerStore({
       return appliedPromo.discountValue;
     }
   }, [appliedPromo, cartSubtotal]);
+
+  const affiliateAccountForCheckout = useMemo(() => {
+    if (!currentPhone) return null;
+    const cleanPhone = currentPhone.trim();
+    if (cleanPhone.length !== 11) return null;
+    return affiliateAccounts.find(acc => acc.phone === cleanPhone) || null;
+  }, [currentPhone, affiliateAccounts]);
+
+  const availableAffiliateBalance = affiliateAccountForCheckout ? affiliateAccountForCheckout.balance : 0;
+
+  const appliedAffiliateDiscount = useMemo(() => {
+    if (!useAffiliateBalance) return 0;
+    const totalBeforeAffiliate = Math.max(0, cartSubtotal - promoDiscountAmount) + activeShippingCharge;
+    return Math.min(totalBeforeAffiliate, availableAffiliateBalance);
+  }, [useAffiliateBalance, cartSubtotal, promoDiscountAmount, activeShippingCharge, availableAffiliateBalance]);
+
+  const globalTotalAdvanceRequired = useMemo(() => {
+    if (advanceConfig && advanceConfig.requireAdvance) {
+      if (advanceConfig.amountType === 'delivery') {
+        return activeShippingCharge;
+      } else {
+        return advanceConfig.fixedAmount || 0;
+      }
+    } else {
+      return selectedCartItems.reduce((sum, item) => {
+        if (item.product.requireAdvance) {
+          return sum + (item.product.advanceAmount || 0) * item.qty;
+        }
+        return sum;
+      }, 0);
+    }
+  }, [advanceConfig, activeShippingCharge, selectedCartItems]);
+
+  const globalIsAdvanceEnabled = globalTotalAdvanceRequired > 0;
 
   const handleApplyPromoCode = () => {
     if (!promoCodes || promoCodes.length === 0) {
@@ -1427,49 +1998,77 @@ export default function CustomerStore({
 
         {/* Sidebar Popup Promotion Widget */}
         {!showPopupModal && activePopups.length > 0 && (
-          <div className="bg-white rounded-2xl overflow-hidden border border-slate-150/80 shadow-2xs p-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-black uppercase text-pink-600 tracking-wider">Special Offer 🔥</span>
-              <span className="text-[10px] text-slate-400 font-mono font-bold">
-                {sidebarPopupIdx + 1}/{activePopups.length}
-              </span>
-            </div>
-            <div className="relative aspect-[3/4] rounded-xl overflow-hidden bg-slate-50 border border-slate-100 group">
-              {activePopups[sidebarPopupIdx].link ? (
-                <a 
-                  href={activePopups[sidebarPopupIdx].link}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="block w-full h-full cursor-pointer"
-                >
-                  <img 
-                    src={activePopups[sidebarPopupIdx].img} 
-                    alt="Special Promo Banner" 
-                    className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                    referrerPolicy="no-referrer"
-                  />
-                </a>
-              ) : (
-                <img 
-                  src={activePopups[sidebarPopupIdx].img} 
-                  alt="Special Promo Banner" 
-                  className="w-full h-full object-cover"
-                  referrerPolicy="no-referrer"
-                />
-              )}
-            </div>
-            {activePopups[sidebarPopupIdx].link && (
+          <div className="relative aspect-square rounded-2xl overflow-hidden border border-slate-200 shadow-md group w-full bg-slate-50">
+            {activePopups[sidebarPopupIdx].link ? (
               <a 
                 href={activePopups[sidebarPopupIdx].link}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="w-full bg-pink-500 hover:bg-pink-600 text-white font-black text-[11px] py-1.5 rounded-xl uppercase transition-all flex items-center justify-center gap-1 cursor-pointer shadow-xs leading-none"
+                className="block w-full h-full cursor-pointer"
               >
-                GET OFFER <ArrowRight className="w-3 h-3" />
+                <img 
+                  src={activePopups[sidebarPopupIdx].img} 
+                  alt="Special Promo Banner" 
+                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                  referrerPolicy="no-referrer"
+                />
               </a>
+            ) : (
+              <img 
+                src={activePopups[sidebarPopupIdx].img} 
+                alt="Special Promo Banner" 
+                className="w-full h-full object-cover"
+                referrerPolicy="no-referrer"
+              />
+            )}
+            {activePopups.length > 1 && (
+              <div className="absolute top-3 right-3 bg-black/60 text-white text-[9px] px-2 py-0.5 rounded-full font-mono font-bold tracking-wider select-none pointer-events-none shadow-xs">
+                {sidebarPopupIdx + 1}/{activePopups.length}
+              </div>
             )}
           </div>
         )}
+
+        {/* Sidebar Affiliate Promotion Widget */}
+        <div className="bg-gradient-to-br from-indigo-100 via-pink-50 to-indigo-50 rounded-2xl overflow-hidden border border-slate-200/80 shadow-2xs p-5 space-y-4 text-left">
+          <div className="flex items-center justify-between">
+            <span className="bg-pink-205 text-pink-805 text-[8.5px] font-black uppercase px-2.5 py-1 rounded-md tracking-wider">
+              {lang === 'en' ? "Partner Program" : "পার্টনার প্রোগ্রাম"}
+            </span>
+            <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+          </div>
+          
+          <div className="space-y-1.5">
+            <h4 className="font-extrabold text-sm text-slate-950 flex items-center gap-1.5 leading-snug">
+              <Award className="w-4.5 h-4.5 text-pink-555 shrink-0" />
+              <span>{lang === 'en' ? "Affiliate Program" : "অ্যাফিলিয়েট প্রোগ্রাম"} 🎯</span>
+            </h4>
+            <p className="text-[11px] text-slate-655 font-medium leading-relaxed">
+              {lang === 'en' 
+                ? "Invite visitors, complete social missions, and earn daily passive income!" 
+                : "ভিজিটরদের আমন্ত্রণ জানান, সোশ্যাল টাস্ক পূরণ করুন এবং প্রতিদিন আয় করুন!"}
+            </p>
+          </div>
+
+          <div className="border-t border-slate-200/60 pt-3 flex flex-col gap-1.5">
+            <div className="flex items-center gap-2 text-[10.5px] font-bold text-slate-700">
+              <span className="w-1.5 h-1.5 rounded-full bg-pink-500" />
+              <span>{lang === 'en' ? "Join Affiliate Marketing" : "অ্যাফিলিয়েট মার্কেটিং এ যোগ দিন"}</span>
+            </div>
+            <div className="flex items-center gap-2 text-[10.5px] font-bold text-slate-700">
+              <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+              <span>{lang === 'en' ? "Share, Earn & Enjoy" : "শেয়ার করুন, আয় করুন এবং উপভোগ করুন"}</span>
+            </div>
+          </div>
+
+          <button
+            onClick={openAffiliatePage}
+            className="w-full bg-pink-600 hover:bg-pink-700 text-white font-black text-xs py-2.5 rounded-xl uppercase transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm hover:shadow active:scale-95 duration-150"
+          >
+            <span>{lang === 'en' ? "Join & Earn Money" : "লগইন / রেজিস্টার করুন"}</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
     );
   };
@@ -1654,17 +2253,47 @@ export default function CustomerStore({
                     >
                       <ArrowLeft className="w-5 h-5 text-white font-extrabold" />
                     </button>
-                    <span className="font-extrabold text-sm text-white tracking-tight select-none uppercase truncate text-center max-w-[180px]">
-                      {viewingProduct ? viewingProduct.name :
-                       showCartPage ? (isCheckingOut ? (lang === 'en' ? "Checkout" : "চেকআউট") : t("My Cart")) :
-                       showShopPage ? t("Shop") :
-                       showAllFlashOffers ? (lang === 'en' ? "Premium Flash" : "প্রিমিয়াম ফ্ল্যাশ") :
-                       showSearchResultsPage ? (lang === 'en' ? "Search" : "খুঁজুন") :
-                       showSupportPage ? t("Help & Support") :
-                       showOnlyFavorites ? t("Saved Items") :
-                       showMyOrdersPage ? (lang === 'en' ? "My Orders" : "আমার অর্ডার") :
-                       showCustProfilePage ? t("My Account") : "Dealy"}
-                    </span>
+                    {(showShopPage || showSearchResultsPage) ? (
+                      <div className="flex-1 mx-2 relative flex items-center h-[28px] xs:h-[32px]">
+                        <input 
+                          type="text" 
+                          placeholder={lang === 'en' ? "Search products..." : "পণ্য খুঁজুন..."}
+                          value={searchInput}
+                          onFocus={() => setSearchFocusedInput('shop')}
+                          onBlur={() => setTimeout(() => setSearchFocusedInput(null), 250)}
+                          onChange={(e) => setSearchInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              handleSearchSubmit();
+                            }
+                          }}
+                          className="w-full h-full bg-white text-slate-900 rounded-lg pl-2.5 pr-8 py-1 text-[10.5px] xs:text-[11.5px] focus:outline-none transition-all placeholder-slate-400 border border-transparent font-semibold shadow-inner"
+                        />
+                        {searchInput ? (
+                          <button 
+                            onClick={() => setSearchInput('')}
+                            className="absolute right-2 text-slate-400 hover:text-slate-600 p-0.5 cursor-pointer transition-colors"
+                            title="Clear"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        ) : (
+                          <Search className="absolute right-2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
+                        )}
+                        {renderSuggestionsDropdown('shop')}
+                      </div>
+                    ) : (
+                      <span className="font-extrabold text-sm text-white tracking-tight select-none uppercase truncate text-center max-w-[180px]">
+                        {viewingProduct ? viewingProduct.name :
+                         showCartPage ? (isCheckingOut ? (lang === 'en' ? "Checkout" : "চেকআউট") : t("My Cart")) :
+                         showAllFlashOffers ? (lang === 'en' ? "Premium Flash" : "প্রিমিয়াম ফ্ল্যাশ") :
+                         showSearchResultsPage ? (lang === 'en' ? "Search" : "খুঁজুন") :
+                         showSupportPage ? t("Help & Support") :
+                         showOnlyFavorites ? t("Saved Items") :
+                         showMyOrdersPage ? (lang === 'en' ? "My Orders" : "আমার অর্ডার") :
+                         showCustProfilePage ? t("My Account") : "Dealy"}
+                      </span>
+                    )}
                     <div className="flex-shrink-0 w-8 flex justify-end">
                       {showCartPage && cart.length > 0 && (
                         <button
@@ -1711,12 +2340,22 @@ export default function CustomerStore({
                   <MoreVertical className="w-4 h-4 xs:w-4.5 xs:h-4.5 text-white font-extrabold shrink-0" />
                 </button>
 
-                <div 
-                  onClick={goHome}
-                  className="flex-shrink-0 font-black text-xs xs:text-sm sm:text-base tracking-[0.03em] text-white cursor-pointer uppercase font-display leading-none ml-1 shadow-sm"
-                >
-                  DEALY
-                </div>
+                {footerConfig.brandLogoUrl ? (
+                  <img
+                    onClick={goHome}
+                    src={footerConfig.brandLogoUrl}
+                    alt="Brand Logo"
+                    className="h-8 max-w-[120px] object-contain cursor-pointer"
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <div 
+                    onClick={goHome}
+                    className="flex-shrink-0 font-black text-xs xs:text-sm sm:text-base tracking-[0.03em] text-white cursor-pointer uppercase font-display leading-none ml-1 shadow-sm"
+                  >
+                    DEALY
+                  </div>
+                )}
 
                 {/* Search input perfectly scaled & aligned */}
                 <div className="flex-1 min-w-[60px] relative flex items-center h-[28px] xs:h-[32px]">
@@ -1724,6 +2363,8 @@ export default function CustomerStore({
                     type="text" 
                     placeholder={lang === 'en' ? "Search..." : "খুঁজুন"}
                     value={searchInput}
+                    onFocus={() => setSearchFocusedInput('mobile')}
+                    onBlur={() => setTimeout(() => setSearchFocusedInput(null), 250)}
                     onChange={(e) => {
                       const val = e.target.value;
                       setSearchInput(val);
@@ -1762,6 +2403,7 @@ export default function CustomerStore({
                   >
                     <Search className="w-3.5 h-3.5 font-black" />
                   </button>
+                  {renderSuggestionsDropdown('mobile')}
                 </div>
 
                 {/* Clean, attractive Reseller button right of search bar with brand pink color theme - styled to perfectly match heights */}
@@ -1791,30 +2433,42 @@ export default function CustomerStore({
           {/* ----------------- DESKTOP STANDARD HEADER (md:flex) ----------------- */}
           <div className="hidden md:flex items-center justify-between w-full h-full gap-3">
             
-            {/* 1. Website Logo & Brand Name - Perfectly styled next to brand initial */}
+            {/* 1. Website Logo & Brand Name */}
             <div className="flex items-center gap-2 flex-shrink-0">
-              <div 
-                onClick={goHome}
-                className="w-9 h-9 rounded-full overflow-hidden border border-white/40 bg-white cursor-pointer hover:scale-105 transition-transform flex-shrink-0 shadow-sm"
-              >
-                <img 
-                  src={footerConfig.brandLogoUrl || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&q=80"} 
-                  alt="Brand Logo" 
-                  className="w-full h-full object-cover"
+              {footerConfig.brandLogoUrl ? (
+                <img
+                  onClick={goHome}
+                  src={footerConfig.brandLogoUrl}
+                  alt="Brand Logo"
+                  className="h-10 sm:h-12 w-auto max-w-[180px] lg:max-w-[220px] object-contain cursor-pointer hover:scale-105 transition-transform"
                   referrerPolicy="no-referrer"
                 />
-              </div>
-              <div 
-                onClick={goHome}
-                className="cursor-pointer flex flex-col justify-center select-none ml-1 flex-shrink-0"
-              >
-                <h1 className="font-black text-lg lg:text-xl tracking-wide text-white cursor-pointer uppercase font-display leading-[0.95] shadow-sm">
-                  DEALY
-                </h1>
-                <span className="text-[7.5px] lg:text-[8px] tracking-[0.1em] font-extrabold text-[#fbcfe8] mt-0.5 uppercase leading-none opacity-90 select-none">
-                  AUTHENTIC SELLER
-                </span>
-              </div>
+              ) : (
+                <>
+                  <div 
+                    onClick={goHome}
+                    className="w-9 h-9 rounded-full overflow-hidden border border-white/40 bg-white cursor-pointer hover:scale-105 transition-transform flex-shrink-0 shadow-sm"
+                  >
+                    <img 
+                      src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&q=80" 
+                      alt="Brand Logo" 
+                      className="w-full h-full object-cover"
+                      referrerPolicy="no-referrer"
+                    />
+                  </div>
+                  <div 
+                    onClick={goHome}
+                    className="cursor-pointer flex flex-col justify-center select-none ml-1 flex-shrink-0"
+                  >
+                    <h1 className="font-black text-lg lg:text-xl tracking-wide text-white cursor-pointer uppercase font-display leading-[0.95] shadow-sm">
+                      DEALY
+                    </h1>
+                    <span className="text-[7.5px] lg:text-[8px] tracking-[0.1em] font-extrabold text-[#fbcfe8] mt-0.5 uppercase leading-none opacity-90 select-none">
+                      AUTHENTIC SELLER
+                    </span>
+                  </div>
+                </>
+              )}
             </div>
 
             {/* 2. Search input bar on desktop - Pill-shaped with a circular search submit button */}
@@ -1823,6 +2477,8 @@ export default function CustomerStore({
                 type="text" 
                 placeholder={lang === 'en' ? "Search premium products, unstitched clothing, smart clocks..." : "প্রিমিয়াম পণ্য, থ্রি-পিস, স্মার্ট ঘড়ি খুঁজুন..."}
                 value={searchInput}
+                onFocus={() => setSearchFocusedInput('desktop')}
+                onBlur={() => setTimeout(() => setSearchFocusedInput(null), 250)}
                 onChange={(e) => {
                   const val = e.target.value;
                   setSearchInput(val);
@@ -1861,6 +2517,7 @@ export default function CustomerStore({
               >
                 <Search className="w-3.5 h-3.5 text-white font-black" />
               </button>
+              {renderSuggestionsDropdown('desktop')}
             </div>
 
             {/* Nav control buttons container - Compact sizes and styles matching user's image exactly */}
@@ -1894,7 +2551,6 @@ export default function CustomerStore({
                 <Sparkles className="w-3.5 h-3.5 text-pink-500 fill-pink-500/10 shrink-0" />
                 <span>{lang === 'en' ? "Join Reseller" : "সেলার হন"}</span>
               </button>
-
               {/* 4. Language Switch Selector - Pill styled with light transparent border */}
               <button 
                 type="button"
@@ -1982,7 +2638,7 @@ export default function CustomerStore({
                   onClick={() => { setAuthType('login'); setShowAuthModal(true); }}
                   className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 border border-white/20 text-white font-extrabold px-3.5 py-1.5 rounded-full shadow transition-all flex items-center shrink-0 text-[11px] h-[34px] xl:h-[36px] active:scale-95"
                 >
-                  <User className="w-3.5 h-3.5 text-white" />
+                  <UserIcon className="w-3.5 h-3.5 text-white" />
                   <span>{lang === 'en' ? 'Account' : 'প্রোফাইল'}</span>
                 </button>
               )}
@@ -1996,13 +2652,44 @@ export default function CustomerStore({
       <div className="h-[52px] md:h-16 w-full flex-shrink-0" />
 
       {/* BODY COLUMN PANEL */}
-      {showCustProfilePage && loggedCustomer && !viewingProduct ? (
+      {viewingCustomDocs ? (
+        <main className="flex-1 max-w-4xl mx-auto w-full px-4 py-8 md:py-12 animate-fade-in text-slate-800 pb-28 md:pb-12 text-left">
+          <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6 sm:p-10 relative overflow-hidden">
+            {/* Header / Back button */}
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-6">
+              <button
+                onClick={() => {
+                  setViewingCustomDocs(null);
+                  window.scrollTo({ top: 300, behavior: 'smooth' });
+                }}
+                className="flex items-center gap-1.5 text-xs font-black text-pink-600 hover:text-pink-700 bg-pink-50 hover:bg-pink-100 py-2 px-4 rounded-xl border border-pink-200 cursor-pointer transition-all uppercase tracking-wider"
+              >
+                <ChevronLeft className="w-4 h-4 stroke-[2.5]" />
+                {lang === 'en' ? 'Back' : 'ফিরে যান'}
+              </button>
+              <span className="text-[10px] uppercase font-black px-2.5 py-1 rounded bg-slate-100 text-slate-500 font-mono">
+                {lang === 'en' ? 'Information Center' : 'তথ্য কেন্দ্র'}
+              </span>
+            </div>
+
+            <div className="prose prose-slate max-w-none text-slate-700 select-text font-medium leading-relaxed font-sans space-y-4">
+              <h2 className="text-xl sm:text-3xl font-black text-slate-900 tracking-tight leading-tight mb-2 uppercase">
+                {viewingCustomDocs.title}
+              </h2>
+              
+              <div 
+                className="text-sm font-semibold text-slate-650 space-y-3 pt-2"
+                dangerouslySetInnerHTML={{ __html: viewingCustomDocs.content }}
+              />
+            </div>
+          </div>
+        </main>
+      ) : showCustProfilePage && loggedCustomer && !viewingProduct ? (
         <main className="flex-1 max-w-4xl mx-auto w-full px-0 sm:px-3 py-0 sm:py-8 animate-fade-in text-slate-800 pb-28 md:pb-12">
           
           <div className="space-y-6 sm:space-y-8 animate-fade-in">
             {/* 1. TOP PROFILE INFORMATION CARD - BEAUTIFIED FOR DEALY */}
             <div className="bg-white rounded-2xl sm:rounded-[24px] border border-slate-100 shadow-sm p-5 sm:p-8 relative overflow-hidden">
-              <div className="absolute top-0 left-0 right-0 h-2 bg-gradient-to-r from-pink-500 via-indigo-500 to-amber-400" />
               
               <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 pb-6 border-b border-slate-100">
                 <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 text-center sm:text-left w-full sm:w-auto">
@@ -2052,7 +2739,7 @@ export default function CustomerStore({
                       <span>সচল মোবাইল: {loggedCustomer.phone}</span>
                     </p>
                     <p className="text-[10px] text-slate-400 font-mono mt-1">
-                      Shopper ID: #{loggedCustomer.id.replace('c_', '')} | @dealy_user
+                      Shopper ID: {loggedCustomer.id === 'c_1' ? '#182001' : (loggedCustomer.id.startsWith('c_18200') ? '#' + loggedCustomer.id.replace('c_', '') : '#18200' + loggedCustomer.id.replace('c_', ''))} | @dealy_user
                     </p>
                     
                     {!isEditingProfile && (
@@ -2108,7 +2795,7 @@ export default function CustomerStore({
                   </div>
 
                   <h4 className="text-xs font-black text-slate-800 uppercase tracking-wide flex items-center gap-2 border-b pb-2.5">
-                    <User className="w-4 h-4 text-pink-500" /> {lang === 'en' ? "Change Profile Details" : "প্রোফাইলের তথ্য পরিবর্তন করুন"}
+                    <UserIcon className="w-4 h-4 text-pink-500" /> {lang === 'en' ? "Change Profile Details" : "প্রোফাইলের তথ্য পরিবর্তন করুন"}
                   </h4>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs leading-normal">
                     <div className="form-group">
@@ -2201,12 +2888,12 @@ export default function CustomerStore({
                 </div>
               ) : (
                 <div className="pt-6 grid grid-cols-1 md:grid-cols-12 gap-5">
-                  <div className={`${showStatement ? 'md:col-span-8' : 'md:col-span-12'} bg-slate-50/50 p-1 rounded-2xl border border-slate-100 text-xs transition-all`}>
+                  <div className="md:col-span-12 bg-slate-50/50 p-1 rounded-2xl border border-slate-100 text-xs transition-all">
                     <div className="grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-slate-100">
                       {/* Name segment */}
                       <div className="p-4 flex items-center gap-3">
                         <div className="p-2.5 bg-pink-50 rounded-xl shrink-0">
-                          <User className="w-5 h-5 text-pink-500" />
+                          <UserIcon className="w-5 h-5 text-pink-500" />
                         </div>
                         <div className="min-w-0 flex-1">
                           <span className="text-[9.5px] text-slate-400 font-extrabold uppercase tracking-wider block">{lang === 'en' ? "Contact Name" : "পূর্ণ নাম"}</span>
@@ -2244,26 +2931,70 @@ export default function CustomerStore({
                     <motion.div 
                       initial={{ opacity: 0, scale: 0.95 }}
                       animate={{ opacity: 1, scale: 1 }}
-                      className="md:col-span-4 bg-gradient-to-r from-indigo-50/20 to-pink-50/10 p-5 rounded-2xl border border-pink-100/50 flex flex-col justify-between shadow-3xs"
+                      className="md:col-span-12 bg-white p-5 sm:p-6 rounded-2xl border border-slate-200/80 shadow-3xs space-y-6 text-left"
                     >
-                      <div>
-                        <span className="text-[10px] text-indigo-600 font-black uppercase tracking-wider block mb-3 flex items-center gap-1.5 border-b pb-1.5 border-indigo-100/30">
-                          <UserCheck className="w-4 h-4 text-pink-500" /> 
-                          <span>{lang === 'en' ? "Dashboard Stats" : "অ্যাকাউন্ট রিপোর্ট"}</span>
-                        </span>
-                        <div className="grid grid-cols-2 gap-2 text-center">
-                          <div className="bg-white p-3 rounded-xl border border-slate-100 shadow-3xs">
-                            <p className="text-[9px] text-slate-400 font-black uppercase">{lang === 'en' ? "Total Purchases" : "মোট কেনাকাটা"}</p>
-                            <p className="font-mono font-black text-pink-600 text-[15px] mt-1">৳{myOrders.reduce((s, o) => s + o.amount, 0)}</p>
-                          </div>
-                          <div className="bg-white p-3 rounded-xl border border-slate-100 shadow-3xs">
-                            <p className="text-[9px] text-slate-400 font-black uppercase">{lang === 'en' ? "Order Count" : "অর্ডার সংখ্যা"}</p>
-                            <p className="font-mono font-black text-indigo-600 text-[15px] mt-1">{myOrders.length}</p>
-                          </div>
+                      {/* Stat summary cards */}
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                        <div className="bg-gradient-to-br from-pink-50/40 to-pink-100/10 p-5 rounded-xl border border-pink-100/40 shadow-3xs">
+                          <p className="text-[10px] text-slate-450 font-black uppercase tracking-wider">{lang === 'en' ? "Delivered Purchases" : "মোট সফল কেনাকাটা"}</p>
+                          <p className="font-mono font-black text-pink-600 text-xl sm:text-2xl mt-1.5">৳{totalPurchasesAmount.toFixed(2)}</p>
+                          <span className="text-[9.5px] text-slate-400 font-bold block mt-1">({lang === 'en' ? "Delivered orders only" : "শুধুমাত্র ডেলিভারি সম্পন্ন"})</span>
+                        </div>
+
+                        <div className="bg-gradient-to-br from-indigo-50/40 to-indigo-100/10 p-5 rounded-xl border border-indigo-100/40 shadow-3xs">
+                          <p className="text-[10px] text-slate-450 font-black uppercase tracking-wider">{lang === 'en' ? "Delivered Order Count" : "ডেলিভারি অর্ডার সংখ্যা"}</p>
+                          <p className="font-mono font-black text-indigo-650 text-xl sm:text-2xl mt-1.5">{totalPurchasesCount} {lang === 'en' ? "orders" : "টি অর্ডার"}</p>
+                          <span className="text-[9.5px] text-slate-400 font-bold block mt-1">({lang === 'en' ? "Active statement report" : "সক্রিয় অ্যাকাউন্ট স্টেটমেন্ট"})</span>
+                        </div>
+
+                        <div className="bg-gradient-to-br from-emerald-50/40 to-emerald-100/10 p-5 rounded-xl border border-emerald-100/40 shadow-3xs">
+                          <p className="text-[10px] text-slate-450 font-black uppercase tracking-wider">{lang === 'en' ? "Referral Team" : "আমার রেফারেল টিম"}</p>
+                          <p className="font-mono font-black text-emerald-650 text-xl sm:text-2xl mt-1.5">{myTeam.length} {lang === 'en' ? "members" : "জন সদস্য"}</p>
+                          <span className="text-[9.5px] text-slate-400 font-bold block mt-1">({lang === 'en' ? "Registered via referral link" : "রেফারেল দিয়ে অ্যাকাউন্ট তৈরি"})</span>
                         </div>
                       </div>
-                      <div className="text-[9.5px] text-slate-400 font-bold block pt-3 text-right">
-                        {lang === 'en' ? "Status: Active today" : "লগইন স্ট্যাটাস: আজ সচল"}
+
+                      {/* Team Listing Area */}
+                      <div className="pt-4 border-t border-slate-100 space-y-3.5">
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-xs sm:text-sm font-extrabold text-slate-800 flex items-center gap-2 uppercase tracking-wide">
+                            <Users className="w-5 h-5 text-pink-500 shrink-0" />
+                            <span>{lang === 'en' ? "My Referral Team" : "আমার রেফারেল টিম"} ({myTeam.length})</span>
+                          </h4>
+                        </div>
+
+                        {myTeam.length === 0 ? (
+                          <div className="bg-slate-50 text-center py-8 px-4 rounded-xl border border-slate-150/60">
+                            <p className="text-xs text-slate-400 font-bold font-sans max-w-md mx-auto">
+                              {lang === 'en' 
+                                ? "No team members have registered using your referral link yet." 
+                                : "আপনার রেফারেল লিংক ব্যবহার করে এখনও কোনো সদস্য অ্যাকাউন্ট রেজিস্টার করেনি।"}
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="overflow-x-auto rounded-xl border border-slate-150/70 shadow-3xs">
+                            <table className="w-full text-left border-collapse text-xs">
+                              <thead>
+                                <tr className="bg-slate-50/80 border-b border-slate-150/70 text-[10px] font-black uppercase text-slate-450 tracking-wider">
+                                  <th className="p-3.5">{lang === 'en' ? "Member Name" : "সদস্যের নাম"}</th>
+                                  <th className="p-3.5">{lang === 'en' ? "Mobile Number" : "মোবাইল নাম্বার"}</th>
+                                  <th className="p-3.5">{lang === 'en' ? "Joined Date" : "যোগদানের তারিখ"}</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100 text-slate-650 font-bold">
+                                {myTeam.map((member, mIdx) => (
+                                  <tr key={mIdx} className="hover:bg-slate-50/50 transition-colors">
+                                    <td className="p-3.5 text-slate-905">{member.name}</td>
+                                    <td className="p-3.5 font-mono text-xs tracking-wide text-slate-700">
+                                      {member.phone.slice(0, 4) + '*****' + member.phone.slice(-3)}
+                                    </td>
+                                    <td className="p-3.5 text-slate-400 text-[11px]">{member.joinedDate}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
                       </div>
                     </motion.div>
                   )}
@@ -2413,7 +3144,7 @@ export default function CustomerStore({
                                 custAddress: editOrderAddress,
                                 timeline: [
                                   ...o.timeline,
-                                  { status: o.status, date: new Date().toLocaleString(), description: 'Shipping details updated by customer.', isCompleted: true }
+                                  { status: o.status, date: formatToDhakaTime(), description: 'Shipping details updated by customer.', isCompleted: true }
                                 ]
                               };
                             }
@@ -2553,7 +3284,7 @@ export default function CustomerStore({
                                                 status: 'Cancelled' as OrderStatus,
                                                 timeline: [
                                                   ...o.timeline,
-                                                  { status: 'Cancelled', date: new Date().toLocaleString(), description: 'Cancelled by customer.', isCompleted: true }
+                                                  { status: 'Cancelled', date: formatToDhakaTime(), description: 'Cancelled by customer.', isCompleted: true }
                                                 ]
                                               };
                                             }
@@ -2603,11 +3334,9 @@ export default function CustomerStore({
       ) : showMyOrdersPage && loggedCustomer && !viewingProduct ? (
         <main className="flex-1 max-w-4xl mx-auto w-full px-0 sm:px-3 py-0 sm:py-8 animate-fade-in text-slate-800 pb-28 md:pb-12">
           <div className="bg-white rounded-none sm:rounded-[24px] border-0 sm:border sm:border-slate-100 shadow-none sm:shadow-xs p-4 sm:p-6 md:p-8 relative overflow-hidden">
-            {/* Top design highlight stripe */}
-            <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-pink-500 via-indigo-500 to-amber-400" />
             
-            {/* Sub-header inside My Orders screen */}
-            <div className="mb-6 flex items-center justify-between font-sans border-b border-slate-100 pb-3 mt-2">
+            {/* Header section matching user's request exactly */}
+            <div className="mb-4 flex items-center justify-between font-sans border-b border-slate-100 pb-3 mt-1">
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => {
@@ -2617,9 +3346,9 @@ export default function CustomerStore({
                   className="p-1 hover:bg-slate-100 rounded-lg text-slate-500 hover:text-slate-800 transition-colors cursor-pointer"
                   title="Back to Profile"
                 >
-                  <ChevronLeft className="w-5 h-5 font-bold" />
+                  <ChevronLeft className="w-6 h-6 stroke-[2.5]" />
                 </button>
-                <h3 className="text-base sm:text-lg font-black text-slate-950 tracking-tight">
+                <h3 className="text-base sm:text-lg font-black text-slate-900 tracking-tight">
                   {lang === 'en' ? "My Orders" : "আমার অর্ডারসমূহ"}
                 </h3>
               </div>
@@ -2628,60 +3357,41 @@ export default function CustomerStore({
               </span>
             </div>
 
-            {/* Daraz-Style Category Status Indicators (With beautiful responsive horizontal grid and count badges) */}
-            <div className="grid grid-cols-4 gap-2 mb-6 pt-2 font-sans">
-              {[
-                { 
-                  id: 'to_pay', 
-                  label: 'To Pay', 
-                  icon: ShoppingCart, 
-                  count: myOrders.filter(o => o.status === 'Pending').length 
-                },
-                { 
-                  id: 'to_ship', 
-                  label: 'To Ship', 
-                  icon: Truck, 
-                  count: myOrders.filter(o => o.status === 'Approved' || o.status === 'Processing' || o.status === 'Shipped').length 
-                },
-                { 
-                  id: 'received', 
-                  label: 'Received', 
-                  icon: ShieldCheck, 
-                  count: myOrders.filter(o => o.status === 'Delivered').length 
-                },
-                { 
-                  id: 'cancelled', 
-                  label: 'Return/Cancel', 
-                  icon: X, 
-                  count: myOrders.filter(o => o.status === 'Cancelled').length 
-                }
-              ].map((tab) => {
-                const IconComp = tab.icon;
-                const isActive = activeProfileTab === tab.id;
-                return (
-                  <button
-                    key={tab.id}
-                    onClick={() => {
-                      setActiveProfileTab(tab.id as any);
-                      setEditingCustomerOrder(null);
-                    }}
-                    className={`relative flex flex-col items-center justify-center p-2 rounded-2xl transition-all cursor-pointer group select-none ${isActive ? 'text-pink-600 scale-[1.03]' : 'text-slate-400 hover:text-slate-705'}`}
-                  >
-                    {/* Icon Container with relative positioning for badge */}
-                    <div className={`relative p-2.5 rounded-2xl transition-all border ${isActive ? 'bg-pink-100/70 border-pink-300 text-pink-600 shadow-2xs' : 'bg-slate-100 hover:bg-slate-200/90 border-slate-250 text-slate-700 shadow-3xs'}`}>
-                      <IconComp className="w-5 h-5 font-bold" />
-                      {tab.count > 0 && (
-                        <span className="absolute -top-1.5 -right-1.5 bg-pink-500 text-white font-mono font-black text-[9px] px-1.5 py-0.5 rounded-full border border-white leading-none min-w-[16px] h-[16px] flex items-center justify-center shadow-xs">
-                          {tab.count}
-                        </span>
+            {/* Scrollable Horizontal Tabs without indicator/control icons as requested */}
+            <div className="relative border-b border-slate-100 mb-6 bg-white shrink-0 scrollbar-none">
+              <div className="flex overflow-x-auto scrollbar-none whitespace-nowrap pb-0.5 gap-5 sm:gap-7 md:gap-9 px-1 scroll-smooth">
+                {[
+                  { id: 'all', label: lang === 'en' ? "All" : "সব" },
+                  { id: 'placed', label: lang === 'en' ? "Placed" : "অর্ডার রিসিভ" },
+                  { id: 'to_ship', label: lang === 'en' ? "To Ship" : "শিপিং" },
+                  { id: 'received', label: lang === 'en' ? "To Received" : "ডেলিভারি" },
+                  { id: 'cancelled', label: lang === 'en' ? "Cancelled" : "বাতিল" },
+                  { id: 'returned', label: lang === 'en' ? "Returned" : "ফেরতকৃত" }
+                ].map((tab) => {
+                  const isActive = orderActiveTab === tab.id;
+                  return (
+                    <button
+                      key={tab.id}
+                      onClick={() => {
+                        setOrderActiveTab(tab.id as any);
+                        setEditingCustomerOrder(null);
+                      }}
+                      className="relative pb-3 pt-1 text-[13px] sm:text-[14px] font-bold tracking-tight transition-all cursor-pointer select-none outline-none flex-shrink-0"
+                    >
+                      <span className={`transition-colors duration-200 ${isActive ? 'text-pink-600 font-extrabold' : 'text-slate-500 hover:text-slate-800 font-semibold'}`}>
+                        {tab.label}
+                      </span>
+                      {isActive && (
+                        <motion.div 
+                          layoutId="activeOrderTabUnderline"
+                          className="absolute bottom-0 left-0 right-0 h-0.5 bg-pink-500 rounded-full"
+                          transition={{ type: "spring", stiffness: 380, damping: 30 }}
+                        />
                       )}
-                    </div>
-                    <span className={`text-[10px] sm:text-xs font-black mt-2 text-center leading-tight transition-all ${isActive ? 'text-pink-600 font-black' : 'text-slate-700 font-extrabold'}`}>
-                      {t(tab.label)}
-                    </span>
-                  </button>
-                );
-              })}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             {/* Orders list outputs */}
@@ -2743,7 +3453,7 @@ export default function CustomerStore({
                               custAddress: editOrderAddress,
                               timeline: [
                                 ...o.timeline,
-                                { status: o.status, date: new Date().toLocaleString(), description: 'Shipping details updated by customer.', isCompleted: true }
+                                { status: o.status, date: formatToDhakaTime(), description: 'Shipping details updated by customer.', isCompleted: true }
                               ]
                             };
                           }
@@ -2767,19 +3477,58 @@ export default function CustomerStore({
               ) : (
                 (() => {
                   const list = myOrders.filter(o => {
-                    if (activeProfileTab === 'to_pay') return o.status === 'Pending';
-                    if (activeProfileTab === 'to_ship') return o.status === 'Approved' || o.status === 'Processing' || o.status === 'Shipped';
-                    if (activeProfileTab === 'received') return o.status === 'Delivered';
-                    if (activeProfileTab === 'cancelled') return o.status === 'Cancelled';
+                    if (orderActiveTab === 'all') return true;
+                    if (orderActiveTab === 'placed') return o.status === 'Pending';
+                    if (orderActiveTab === 'to_ship') return o.status === 'Approved' || o.status === 'Processing' || o.status === 'Shipped';
+                    if (orderActiveTab === 'received') return o.status === 'Delivered';
+                    if (orderActiveTab === 'cancelled') return o.status === 'Cancelled';
                     return false;
                   });
 
                   if (list.length === 0) {
                     return (
-                      <div className="text-center py-14 bg-slate-50 border border-slate-100 rounded-3xl animate-fade-in-up">
-                        <Package className="w-12 h-12 text-slate-200 mx-auto mb-2" />
-                        <p className="text-slate-400 text-sm font-black uppercase tracking-wider">No matching active orders</p>
-                        <p className="text-slate-400 text-[10px] font-bold mt-1 max-w-xs mx-auto">Items you submit, pay for, or cancel in the future will automatically reflect in this status group tab.</p>
+                      <div className="text-center py-12 md:py-16 px-4 animate-fade-in flex flex-col items-center justify-center font-sans">
+                        {/* Radial orange-yellow modern gradient sad face SVG emoji */}
+                        <svg className="w-24 h-24 mx-auto mb-5 select-none" viewBox="0 0 100 100">
+                          <defs>
+                            <radialGradient id="sadFaceGrad" cx="50%" cy="50%" r="50%" fx="30%" fy="30%">
+                              <stop offset="0%" stopColor="#fffb80" />
+                              <stop offset="70%" stopColor="#ffb000" />
+                              <stop offset="100%" stopColor="#ff7b00" />
+                            </radialGradient>
+                          </defs>
+                          <circle cx="50" cy="50" r="45" fill="url(#sadFaceGrad)" stroke="#eb8d00" strokeWidth="1" />
+                          {/* Eyes */}
+                          <circle cx="34" cy="40" r="5" fill="#1e293b" />
+                          <circle cx="66" cy="40" r="5" fill="#1e293b" />
+                          {/* Mouth curved downwards (frown) */}
+                          <path d="M 32,68 Q 50,50 68,68" fill="none" stroke="#1e293b" strokeWidth="5.5" strokeLinecap="round" />
+                        </svg>
+
+                        <h4 className="text-[17px] font-black text-slate-850 tracking-tight mb-1">
+                          {lang === 'en' ? "Your order list is empty" : "আপনার অর্ডার তালিকা খালি"}
+                        </h4>
+                        <p className="text-[11.5px] text-slate-450 font-bold max-w-xs mx-auto mb-6 text-center leading-relaxed">
+                          {lang === 'en' ? "Start exploring our products with great discount" : "দারুণ ডিসকাউন্টে আমাদের আকর্ষণীয় পণ্যগুলো দেখতে শুরু করুন"}
+                        </p>
+
+                        <button 
+                          onClick={() => {
+                            setShowShopPage(true); 
+                            setSelectedCat(null); 
+                            setSelectedOffer(null); 
+                            setViewingProduct(null); 
+                            setShowCustProfilePage(false);
+                            setShowCartPage(false);
+                            setShowSupportPage(false);
+                            setShowMyOrdersPage(false);
+                            setShowResellerLandingPage(false);
+                            window.scrollTo({ top: 0, behavior: "smooth" });
+                          }}
+                          className="bg-pink-500 hover:bg-pink-600 active:scale-98 text-white font-black text-xs px-10 py-3 rounded-full shadow-md uppercase tracking-wide cursor-pointer transition-all"
+                        >
+                          {lang === 'en' ? "Continue Shopping" : "শপিং চালিয়ে যান"}
+                        </button>
                       </div>
                     );
                   }
@@ -2883,7 +3632,7 @@ export default function CustomerStore({
                                               status: 'Cancelled' as OrderStatus,
                                               timeline: [
                                                 ...o.timeline,
-                                                { status: 'Cancelled', date: new Date().toLocaleString(), description: 'Cancelled by customer.', isCompleted: true }
+                                                { status: 'Cancelled', date: formatToDhakaTime(), description: 'Cancelled by customer.', isCompleted: true }
                                               ]
                                             };
                                           }
@@ -3065,7 +3814,7 @@ export default function CustomerStore({
                   const matchedDistrict = deliveryCharges.find(dc => dc.id === checkoutDistrictId);
                   const isFreeDeliveryApplied = isFreeDeliveryActive && selectedCartItems.some(item => item.product.isFlash);
                   const deliveryCostAmount = isFreeDeliveryApplied ? 0 : (matchedDistrict ? matchedDistrict.charge : 0);
-                  const finalTotalSum = Math.max(0, cartSubtotal - promoDiscountAmount) + deliveryCostAmount;
+                  const finalTotalSum = Math.max(0, cartSubtotal - promoDiscountAmount) + deliveryCostAmount - appliedAffiliateDiscount;
 
                   let totalAdvanceRequired = 0;
                   if (advanceConfig && advanceConfig.requireAdvance) {
@@ -3317,6 +4066,38 @@ export default function CustomerStore({
                                     </button>
                                   </div>
                                 )}
+
+                                {/* Affiliate Balance Option */}
+                                {availableAffiliateBalance > 0 && (
+                                  <div className="flex items-center justify-between gap-3 animate-fade-in pt-1.5 border-t border-dashed border-slate-200 mt-1.5">
+                                    <div className="flex items-center gap-1.5 min-w-0">
+                                      <Award className="w-3.5 h-3.5 text-pink-600 shrink-0" />
+                                      <div className="min-w-0 text-left">
+                                        <p className="text-[10px] sm:text-[11px] font-bold text-slate-800 leading-tight">
+                                          {lang === 'en' ? 'Use Affiliate Balance' : 'এফিলিয়েট ব্যালেন্স ব্যবহার করুন'}
+                                        </p>
+                                        <p className="text-[9.5px] text-pink-500 font-extrabold mt-0.5 leading-none">
+                                          {lang === 'en' ? `Available Balance: ৳${availableAffiliateBalance.toFixed(2)}` : `উপলব্ধ ব্যালেন্স: ৳${availableAffiliateBalance.toFixed(2)}`}
+                                        </p>
+                                      </div>
+                                    </div>
+                                    
+                                    {/* Custom Switch / Slide Toggle Button */}
+                                    <button
+                                      type="button"
+                                      onClick={() => setUseAffiliateBalance(!useAffiliateBalance)}
+                                      className={`relative inline-flex h-4 w-8 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                                        useAffiliateBalance ? 'bg-pink-500' : 'bg-slate-200'
+                                      }`}
+                                    >
+                                      <span
+                                        className={`pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
+                                          useAffiliateBalance ? 'translate-x-4' : 'translate-x-0'
+                                        }`}
+                                      />
+                                    </button>
+                                  </div>
+                                )}
                               </div>
 
                               {/* Billing invoice breakdowns */}
@@ -3332,6 +4113,15 @@ export default function CustomerStore({
                                       {lang === 'en' ? 'Discount Code:' : 'ডিসকাউন্ট কোড:'}
                                     </span>
                                     <span className="font-mono font-extrabold">-৳ {promoDiscountAmount}</span>
+                                  </div>
+                                )}
+                                {appliedAffiliateDiscount > 0 && (
+                                  <div className="flex justify-between items-center text-pink-600 animate-fade-in">
+                                    <span className="flex items-center gap-1 font-bold">
+                                      <Award className="w-3.5 h-3.5 shrink-0" />
+                                      {lang === 'en' ? 'Affiliate Balance Used:' : 'এফিলিয়েট ব্যালেন্স ব্যবহার:'}
+                                    </span>
+                                    <span className="font-mono font-extrabold">-৳ {appliedAffiliateDiscount}</span>
                                   </div>
                                 )}
                                 <div className="flex justify-between items-center">
@@ -3363,8 +4153,15 @@ export default function CustomerStore({
                                       showNotif(lang === 'en' ? "Please select a Delivery District Region first." : "অনুগ্রহ করে ডেলিভারি এলাকা বা জেলা নির্বাচন করুন।", "error");
                                       return;
                                     }
+                                    if (isAdvanceEnabled && checkoutPaymentMethod === 'COD') {
+                                      setCheckoutPaymentMethod('bKash');
+                                    }
                                     setClickedPayToConfirm(true);
-                                    window.scrollTo({ top: 0, behavior: "smooth" });
+                                    if (window.innerWidth >= 768) {
+                                      setShowCartModal(true);
+                                    } else {
+                                      window.scrollTo({ top: 0, behavior: "smooth" });
+                                    }
                                     showNotif(lang === 'en' ? "Payment gateway loaded. Select your method securely." : "পেমেন্ট মাধ্যমসমূহ লোড হয়েছে। অনুগ্রহ করে আপনার পেমেন্ট মাধ্যমটি নির্বাচন করুন।", "success");
                                   }}
                                   className="w-full bg-[#f85606] hover:bg-[#d04600] text-white font-extrabold py-3 px-5 rounded-xl flex items-center justify-between text-xs uppercase tracking-wider transition-all shadow-md active:scale-[0.98] cursor-pointer"
@@ -3531,12 +4328,18 @@ export default function CustomerStore({
                             {/* Cash on Delivery (COD) Selection Item */}
                             <button 
                               type="button"
+                              disabled={isAdvanceEnabled}
                               onClick={() => {
+                                if (isAdvanceEnabled) return;
                                 setCheckoutPaymentMethod('COD');
                                 setCheckoutTxId('');
                               }}
-                              className={`w-full bg-white p-3.5 flex items-center justify-between gap-3 text-left transition-all hover:bg-slate-100/30 cursor-pointer ${
-                                checkoutPaymentMethod === 'COD' ? 'bg-green-100/10' : ''
+                              className={`w-full p-3.5 flex items-center justify-between gap-3 text-left transition-all ${
+                                isAdvanceEnabled 
+                                  ? 'bg-slate-50 opacity-40 cursor-not-allowed select-none' 
+                                  : 'bg-white hover:bg-slate-100/30 cursor-pointer'
+                              } ${
+                                checkoutPaymentMethod === 'COD' && !isAdvanceEnabled ? 'bg-green-100/10' : ''
                               }`}
                             >
                               <div className="flex items-center gap-3">
@@ -3544,12 +4347,24 @@ export default function CustomerStore({
                                   <Truck className="w-4.5 h-4.5" />
                                 </div>
                                 <div>
-                                  <span className="block text-[11.5px] font-black text-slate-808 font-sans">Cash on Delivery</span>
-                                  <span className="block text-[9.5px] text-slate-400 font-bold select-none font-sans">Pay at your shipping doorstep handoff!</span>
+                                  <span className="block text-[11.5px] font-black text-slate-800 font-sans flex items-center gap-1.5">
+                                    Cash on Delivery
+                                    {isAdvanceEnabled && (
+                                      <span className="text-[8px] bg-amber-50 text-amber-700 border border-amber-200 px-1 rounded uppercase font-black tracking-wide">
+                                        {lang === 'en' ? 'Unavailable: Advance Required' : 'নিষ্ক্রিয়: অগ্রিম আবশ্যক'}
+                                      </span>
+                                    )}
+                                  </span>
+                                  <span className="block text-[9.5px] text-slate-400 font-bold select-none font-sans">
+                                    {isAdvanceEnabled 
+                                      ? (lang === 'en' ? 'Disabled because advance payment is required for these items.' : 'অগ্রিম পেমেন্ট বাধ্যতামূলক হওয়ায় ক্যাশ অন ডেলিভারি প্রযোজ্য নয়।')
+                                      : (lang === 'en' ? 'Pay at your shipping doorstep handoff!' : 'ডেলিভারি পাওয়ার পর সম্পূর্ণ মূল্য পরিশোধ করুন।')
+                                    }
+                                  </span>
                                 </div>
                               </div>
                               <div className="flex items-center gap-1.5">
-                                {checkoutPaymentMethod === 'COD' && <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>}
+                                {checkoutPaymentMethod === 'COD' && !isAdvanceEnabled && <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>}
                                 <ChevronRight className="w-4 h-4 text-slate-400" />
                               </div>
                             </button>
@@ -3926,61 +4741,121 @@ export default function CustomerStore({
 
           {/* 3. Fully Functional Reseller Application Form Area */}
           <div id="register_area" className="mt-12 max-w-lg mx-auto bg-white border border-slate-200 rounded-[32px] p-6 sm:p-8 shadow-md relative scroll-mt-6">
-            <div className="absolute top-0 left-0 right-0 h-2 bg-gradient-to-r from-pink-500 via-rose-500 to-amber-400" />
             <div className="text-center pb-5 border-b mb-6 border-slate-100">
               <h3 className="font-extrabold text-base text-slate-950 uppercase leading-none">রিসেলার অ্যাকাউন্ট রেজিস্ট্রেশন</h3>
               <p className="text-[10px] text-slate-400 mt-1.5">Apply securely by providing your profile details below</p>
             </div>
 
-            <form onSubmit={handleJoinSellerSubmit} className="space-y-4 text-xs text-slate-700">
-              <div>
-                <label className="text-[10px] text-slate-450 font-black uppercase tracking-wider block mb-1">আপনার সম্পূর্ণ নাম *</label>
-                <input 
-                  type="text" 
-                  required
-                  placeholder="e.g. আশরাফুল ইসলাম (Asik)" 
-                  className="w-full border border-slate-250 hover:border-slate-350 focus:border-pink-500 bg-slate-50/20 rounded-xl px-4 py-3 font-semibold text-slate-900 focus:outline-none focus:ring-0 transition-colors"
-                  value={sellerData.name}
-                  onChange={(e) => setSellerData({ ...sellerData, name: e.target.value })}
-                />
-              </div>
+            {isResellerRegSuccess && lastSubmittedSeller ? (
+              <div className="text-center py-6 px-1 space-y-5 animate-fade-in text-slate-800">
+                <div className="w-16 h-16 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center mx-auto shadow-xs">
+                  <Check className="w-8 h-8 font-extrabold" />
+                </div>
+                
+                <div className="space-y-1.5 font-sans">
+                  <h4 className="font-extrabold text-base text-slate-900">
+                    রেজিস্ট্রেশন সফল হয়েছে!
+                  </h4>
+                  <p className="text-[11.5px] text-slate-500 font-semibold leading-relaxed">
+                    আপনার রিসেলার রিকোয়েস্ট সফলভাবে আমাদের সার্ভারে জমা নেওয়া হয়েছে। অনুগ্রহ করে হোয়াটসঅ্যাপ এ যোগাযোগ করে আপনার রিকোয়েস্ট দ্রুত অ্যাক্টিভ করে নিন।
+                  </p>
+                </div>
 
-              <div>
-                <label className="text-[10px] text-slate-450 font-black uppercase tracking-wider block mb-1">সচল মোবাইল নাম্বার *</label>
-                <input 
-                  type="tel" 
-                  required
-                  placeholder="e.g. 017XXXXXXXX"
-                  className="w-full border border-slate-250 hover:border-slate-350 focus:border-pink-500 bg-slate-50/20 rounded-xl px-4 py-3 font-mono font-bold text-slate-900 focus:outline-none focus:ring-0 transition-colors"
-                  value={sellerData.phone}
-                  onChange={(e) => setSellerData({ ...sellerData, phone: e.target.value })}
-                />
-              </div>
+                <div className="bg-slate-50 rounded-2xl p-4 border text-left text-xs text-slate-650 space-y-1.5 font-semibold font-sans">
+                  <div>নাম: <span className="text-slate-900 font-extrabold">{lastSubmittedSeller.name}</span></div>
+                  <div>মোবাইল: <span className="text-slate-900 font-mono font-extrabold">{lastSubmittedSeller.phone}</span></div>
+                  {lastSubmittedSeller.details && (
+                    <div className="text-[11px] leading-tight text-slate-450 mt-1 pl-2 border-l-2 border-slate-200 font-medium">
+                      {lastSubmittedSeller.details}
+                    </div>
+                  )}
+                </div>
 
-              <div>
-                <label className="text-[10px] text-slate-450 font-black uppercase tracking-wider block mb-1">অতীতের অভিজ্ঞতা বা কাস্টমাইজড রিমার্কস *</label>
-                <textarea 
-                  rows={3}
-                  required
-                  placeholder="e.g. আমি পূর্বে কসমেটিক্স নিয়ে ফেসবুকে রিসেলিং করেছি..."
-                  className="w-full border border-slate-250 hover:border-slate-350 focus:border-pink-500 bg-slate-50/20 rounded-xl px-4 py-3 font-semibold text-slate-900 focus:outline-none focus:ring-0 transition-colors leading-relaxed"
-                  value={sellerData.details}
-                  onChange={(e) => setSellerData({ ...sellerData, details: e.target.value })}
-                />
-              </div>
+                <div className="pt-2">
+                  <a 
+                    href={`https://wa.me/8801735165971?text=${encodeURIComponent(
+                      `আসসালামু আলাইকুম,\nআমি রিসেলার হিসেবে রেজিস্ট্রেশন করেছি।\n\nনাম: ${lastSubmittedSeller.name}\nমোবাইল: ${lastSubmittedSeller.phone}\nঅভিজ্ঞতা: ${lastSubmittedSeller.details || 'N/A'}\n\nদয়া করে দ্রুত আমার অ্যাকাউন্টটি একটিভেট করে দিন। ধন্যবাদ!`
+                    )}`}
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold py-3.5 rounded-xl text-xs flex items-center justify-center gap-2 shadow-md shadow-emerald-500/10 active:scale-95 transition-all text-center cursor-pointer font-sans"
+                  >
+                    <MessageSquare className="w-4 h-4 shrink-0" />
+                    <span>হোয়াটসঅ্যাপ মেসেজ দিন</span>
+                  </a>
+                </div>
 
-              <div className="bg-slate-50 border p-3 rounded-xl flex items-start gap-2 border-slate-105/90">
-                <Check className="w-4 h-4 text-emerald-555 text-emerald-600 flex-shrink-0 mt-0.5" />
-                <p className="text-[10px] text-slate-500 leading-normal font-medium">বেসিক রেজিস্ট্রেশনের পর ১২ থেকে ২৪ ঘণ্টার মধ্যে আমাদের টিম আপনার সাথে ফোনে যোগাযোগ করবে।</p>
+                <button
+                  type="button"
+                  onClick={() => setIsResellerRegSuccess(false)}
+                  className="text-[10px] font-bold text-slate-400 hover:text-slate-650 underline cursor-pointer mt-2"
+                >
+                  নতুন করে ফর্ম পূরণ করুন (Reset Form)
+                </button>
               </div>
+            ) : (
+              <form onSubmit={handleJoinSellerSubmit} className="space-y-4 text-xs text-slate-700">
+                <div>
+                  <label className="text-[10px] text-slate-450 font-black uppercase tracking-wider block mb-1">আপনার সম্পূর্ণ নাম *</label>
+                  <input 
+                    type="text" 
+                    required
+                    placeholder="e.g. আশরাফুল ইসলাম (Asik)" 
+                    className="w-full border border-slate-250 hover:border-slate-350 focus:border-pink-500 bg-slate-50/20 rounded-xl px-4 py-3 font-semibold text-slate-900 focus:outline-none focus:ring-0 transition-colors"
+                    value={sellerData.name}
+                    onChange={(e) => setSellerData({ ...sellerData, name: e.target.value })}
+                  />
+                </div>
 
-              <button 
-                type="submit"
-                className="mt-2 w-full bg-gradient-to-r from-pink-500 to-rose-500 text-white py-3.5 rounded-xl text-xs font-black uppercase tracking-wider hover:shadow-lg active:scale-95 transition-all shrink-0 cursor-pointer"
-              >
-                সাবমিট অ্যাপ্লিকেশন ➔
-              </button>
-            </form>
+                <div>
+                  <label className="text-[10px] text-slate-450 font-black uppercase tracking-wider block mb-1">সচল মোবাইল নাম্বার *</label>
+                  <input 
+                    type="tel" 
+                    required
+                    placeholder="e.g. 017XXXXXXXX"
+                    className="w-full border border-slate-250 hover:border-slate-350 focus:border-pink-500 bg-slate-50/20 rounded-xl px-4 py-3 font-mono font-bold text-slate-900 focus:outline-none focus:ring-0 transition-colors"
+                    value={sellerData.phone}
+                    onChange={(e) => setSellerData({ ...sellerData, phone: e.target.value })}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] text-slate-450 font-black uppercase tracking-wider block mb-1">অতীতের অভিজ্ঞতা বা কাস্টমাইজড রিমার্কস *</label>
+                  <textarea 
+                    rows={3}
+                    required
+                    placeholder="e.g. আমি পূর্বে কসমেটিক্স নিয়ে ফেসবুকে রিসেলিং করেছি..."
+                    className="w-full border border-slate-250 hover:border-slate-350 focus:border-pink-500 bg-slate-50/20 rounded-xl px-4 py-3 font-semibold text-slate-900 focus:outline-none focus:ring-0 transition-colors leading-relaxed"
+                    value={sellerData.details}
+                    onChange={(e) => setSellerData({ ...sellerData, details: e.target.value })}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] text-slate-450 font-black uppercase tracking-wider block mb-1">রেফারাল কোড (Referral Code - ঐচ্ছিক)</label>
+                  <input 
+                    type="text" 
+                    placeholder="e.g. #001 (যদি থাকে)"
+                    className="w-full border border-slate-250 hover:border-slate-350 focus:border-pink-500 bg-slate-50/20 rounded-xl px-4 py-3 font-mono font-bold text-slate-900 focus:outline-none focus:ring-0 transition-colors placeholder:font-sans placeholder:font-normal"
+                    value={sellerData.referredByCode}
+                    onChange={(e) => setSellerData({ ...sellerData, referredByCode: e.target.value })}
+                  />
+                  <p className="text-[9px] text-slate-400 mt-1">If another active reseller referred you to Dealy, enter their partner Reseller Code here.</p>
+                </div>
+
+                <div className="bg-slate-50 border p-3 rounded-xl flex items-start gap-2 border-slate-105/90">
+                  <Check className="w-4 h-4 text-emerald-555 text-emerald-600 flex-shrink-0 mt-0.5" />
+                  <p className="text-[10px] text-slate-500 leading-normal font-medium">বেসিক রেজিস্ট্রেশনের পর ১২ থেকে ২৪ ঘণ্টার মধ্যে আমাদের টিম আপনার সাথে ফোনে যোগাযোগ করবে।</p>
+                </div>
+
+                <button 
+                  type="submit"
+                  className="mt-2 w-full bg-gradient-to-r from-pink-500 to-rose-500 text-white py-3.5 rounded-xl text-xs font-black uppercase tracking-wider hover:shadow-lg active:scale-95 transition-all shrink-0 cursor-pointer"
+                >
+                  সাবমিট অ্যাপ্লিকেশন ➔
+                </button>
+              </form>
+            )}
           </div>
 
           {/* 4. Reseller Details / Pathway grid cards */}
@@ -4045,7 +4920,19 @@ export default function CustomerStore({
                     </div>
 
                     <button
-                      onClick={() => showNotif(`Dealy: ${sub.name} subscription checkout trigger is enabled. Please connect with support desk to pay ৳${sub.price}!`, "success")}
+                      onClick={() => {
+                        setSelectedSubPackage(sub);
+                        setSubPaymentMethod('');
+                        setSubTrxId('');
+                        setIsSubSuccess(false);
+                        setSubStep(1);
+                        setSubRegName('');
+                        setSubRegEmail('');
+                        setSubRegPhone('');
+                        setSubRegAddress('');
+                        setSubRegBusinessName('');
+                        setSubRegPassword('');
+                      }}
                       className="mt-6 w-full bg-slate-900 hover:bg-slate-800 text-white font-extrabold py-3 rounded-2xl text-[10.5px] uppercase tracking-wider active:scale-95 transition-all cursor-pointer"
                     >
                       সাবস্ক্রাইব করুন ➔
@@ -4127,25 +5014,606 @@ export default function CustomerStore({
             </div>
           )}
         </main>
+      ) : showAffiliatePage && !viewingProduct ? (
+        <main className="flex-1 max-w-5xl mx-auto w-full px-3 py-6 md:py-10 animate-fade-in text-slate-800 pb-24" id="affiliate_hub_main">
+          {/* Top Return Button */}
+          <button
+            onClick={goHome}
+            className="mb-6 bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold px-4 py-2 rounded-xl text-xs flex items-center gap-2 cursor-pointer transition-all active:scale-95 shadow-4xs"
+          >
+            <ChevronLeft className="w-4 h-4" /> Back to Store / হোম স্টোর
+          </button>
+
+          {!loggedAffiliate ? (
+            <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-200 shadow-sm max-w-md mx-auto text-center space-y-5 animate-scale-in">
+              <div className="w-16 h-16 rounded-full bg-pink-50 border border-pink-100 flex items-center justify-center mx-auto shadow-xs">
+                <Shield className="w-8 h-8 text-pink-600" />
+              </div>
+              <div className="space-y-1.5">
+                <h3 className="font-extrabold text-base text-slate-900">Sign In Required (লগইন করা আবশ্যক)</h3>
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  To view and participate in Dealy's high earning Affiliate Program, you must be signed in to your account.
+                </p>
+                <p className="text-xs text-slate-400 font-medium">
+                  অংশীদার প্রোগ্রামে যোগ দিতে বা ব্যালেন্স দেখতে অনুগ্রহ করে প্রথমে আপনার ডিলি অ্যাকাউন্টে লগইন করুন।
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthType('login');
+                  setShowAuthModal(true);
+                }}
+                className="w-full bg-pink-600 hover:bg-pink-750 text-white font-black text-xs py-3 rounded-xl transition-all shadow-sm active:scale-95 cursor-pointer flex items-center justify-center gap-2"
+              >
+                Log In / Create Account (লগইন / রেজিষ্ট্রেশন) ➔
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {/* STATS DECK */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5" id="affiliate_store_stats">
+                <div className="bg-white p-3.5 sm:p-5 rounded-2xl border border-slate-200/80 shadow-3xs flex items-center justify-between gap-3">
+                  <div>
+                    <span className="text-[9px] sm:text-[10px] font-black uppercase text-slate-450 tracking-wider block">Wallet Balance (টাকা)</span>
+                    <h2 className="text-xl sm:text-2xl md:text-3xl font-black text-pink-650 tracking-tight mt-0.5 sm:mt-1">৳ {loggedAffiliate.balance.toFixed(2)}</h2>
+                  </div>
+                  <button
+                    onClick={() => setShowPayoutModal(true)}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[11px] sm:text-xs px-3 py-2 sm:px-4 sm:py-2.5 rounded-xl transition-all shadow-sm active:scale-95 cursor-pointer shrink-0 self-center flex items-center gap-1 border-none"
+                    title="Request withdrawal"
+                  >
+                    Payout ➔
+                  </button>
+                </div>
+
+                <div className="bg-white p-3.5 sm:p-5 rounded-2xl border border-slate-200/80 shadow-3xs flex flex-col justify-between">
+                  <div>
+                    <span className="text-[9px] sm:text-[10px] font-black uppercase text-slate-450 tracking-wider block">Link Click Traffic</span>
+                    <h2 className="text-lg sm:text-2xl md:text-3xl font-black text-slate-900 mt-0.5 sm:mt-1">{loggedAffiliate.clicksCount} clicks</h2>
+                  </div>
+                  <p className="text-[9.5px] sm:text-[10.5px] text-slate-400 mt-1.5 sm:mt-2 font-medium">Earn ৳{affiliateRatePerClick} per non-duplicate unique click.</p>
+                </div>
+
+                <div className="bg-white p-3.5 sm:p-5 rounded-2xl border border-slate-200/80 shadow-3xs flex flex-col justify-between">
+                  <div>
+                    <span className="text-[9px] sm:text-[10px] font-black uppercase text-slate-450 tracking-wider block">Completed Micro Missions</span>
+                    <h2 className="text-lg sm:text-2xl md:text-3xl font-black text-indigo-750 mt-0.5 sm:mt-1">
+                      {affiliateSubmissions.filter(s => s.userPhone === loggedAffiliate.phone && s.status === 'approved').length} cleared
+                    </h2>
+                  </div>
+                  <p className="text-[9.5px] sm:text-[10.5px] text-slate-400 mt-1.5 sm:mt-2 font-medium">
+                    Pending submissions: {affiliateSubmissions.filter(s => s.userPhone === loggedAffiliate.phone && s.status === 'pending').length}
+                  </p>
+                </div>
+              </div>
+
+              {/* REFERRAL LINK PORTLET */}
+              <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-200 shadow-3xs space-y-4" id="affiliate_link_section">
+                <h4 className="text-sm font-extrabold text-slate-900 flex items-center gap-1.5 border-b pb-3">
+                  <Globe className="w-4 h-4 text-pink-500 animate-spin" /> Your Unique Tracking Link (Flux Tracker)
+                </h4>
+                <div className="bg-slate-50 border rounded-2xl p-4 flex flex-col md:flex-row items-center justify-between gap-4">
+                  <div className="space-y-1 w-full md:flex-1 text-center md:text-left">
+                    <span className="text-[9px] font-black uppercase text-pink-650 bg-pink-100 px-2 py-0.5 rounded">Active tracking URL</span>
+                    <p className="font-mono text-xs font-black text-slate-800 mt-2 select-all select-text pb-1 break-all bg-white border p-3 rounded-xl max-w-full overflow-x-auto">
+                      {window.location.origin}/?ref={loggedAffiliate.phone}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(`${window.location.origin}/?ref=${loggedAffiliate.phone}`);
+                      showNotif('Referral trackable link copied cleanly to your clipboard!', 'success');
+                    }}
+                    className="w-full md:w-auto bg-pink-600 hover:bg-pink-755 text-white px-5 py-3 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 shadow-xs transition-transform cursor-pointer animate-pulse"
+                  >
+                    <Check className="w-4 h-4 text-white" /> Copy Link (লিংক কপি করুন)
+                  </button>
+                </div>
+                <div className="text-[11px] text-slate-500 leading-relaxed font-medium bg-indigo-50 p-4 rounded-xl border border-indigo-100">
+                  💡 <b>Earning Logic / ইনকামের নিয়ম:</b> Share this system URL over Facebook groups, Messenger, WhatsApp or YouTube comments. Each customer visiting our shop using your tracking reference automatically adds <b>৳ {affiliateRatePerClick} BDT Taka</b> directly into your partner wallet. Fraudulent clicks from active duplicate IPs are discarded.
+                </div>
+              </div>
+
+              {/* TASKS VIEW & SUBMISSION */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6" id="affiliate_tasks_and_cashout">
+                {/* 1. Tasks catalog */}
+                <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-3xs space-y-4 flex flex-col justify-between">
+                  <div>
+                    <h3 className="text-sm font-extrabold text-slate-905 border-b pb-3 flex items-center justify-between">
+                      <span className="flex items-center gap-1.5"><Award className="w-4 h-4 text-indigo-500" /> Dynamic Missions Tasks (সোশ্যাল টাস্ক সমূহ)</span>
+                      <span className="text-[10px] text-slate-400 font-bold">Total: {affiliateTasks.filter(t => t.status === 'active').length}</span>
+                    </h3>
+
+                    {affiliateTasks.filter(t => t.status === 'active').length === 0 ? (
+                      <p className="text-center text-xs text-slate-400 py-10">No active affiliate micro-missions set by supervisor.</p>
+                    ) : (
+                      <div className="space-y-3.5 pt-2 max-h-[420px] overflow-y-auto pr-1">
+                        {affiliateTasks.filter(t => t.status === 'active').map(task => {
+                          const userSub = affiliateSubmissions.find(s => s.userPhone === loggedAffiliate.phone && s.taskTitle === task.title);
+                          return (
+                            <div key={task.id} className="p-4 border rounded-xl bg-slate-50 border-slate-100 flex flex-col justify-between space-y-3">
+                              <div className="space-y-1">
+                                <div className="flex justify-between items-center">
+                                  <span className="text-[10px] uppercase font-black px-2 py-0.5 rounded bg-indigo-50 text-indigo-650">{task.platform}</span>
+                                  {userSub ? (
+                                    <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded ${
+                                      userSub.status === 'approved' ? 'bg-emerald-100 text-emerald-700' :
+                                      userSub.status === 'rejected' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+                                    }`}>
+                                      {userSub.status}
+                                    </span>
+                                  ) : (
+                                    <span className="text-[10px] text-indigo-750 font-black">৳ {task.reward} BDT</span>
+                                  )}
+                                </div>
+                                <h4 className="text-xs font-black text-slate-900">{task.title}</h4>
+                                <p className="text-[10px] text-slate-500 leading-normal">{task.desc}</p>
+                                
+                                <div className="pt-1.5">
+                                  <span className="text-[9px] bg-slate-200/60 font-bold text-slate-650 px-2 py-0.5 rounded">
+                                    Requires: {task.requiredProofType === 'link' ? 'Link Only' : task.requiredProofType === 'screenshot' ? 'Screenshot URL' : 'Both (Link & Screenshot)'}
+                                  </span>
+                                </div>
+                              </div>
+
+                              {!userSub && (
+                                <button
+                                  onClick={() => {
+                                    setProofTaskId(task.id);
+                                    setProofSubmitLink('');
+                                    setProofSubmitScreenshot('');
+                                    setProofText('');
+                                    setShowProofSubmitModal(true);
+                                  }}
+                                  className="w-full bg-slate-200 border-none hover:bg-pink-600 hover:text-white text-slate-755 text-[10.5px] font-black py-2 rounded-lg transition-colors cursor-pointer text-center"
+                                >
+                                  Submit Proof (টাস্ক প্রুফ সাবমিট)
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* 2. Beautiful Payout List History (Cleans up former input form layout clutter) */}
+                <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-3xs space-y-4 flex flex-col justify-between">
+                  <div>
+                    <h3 className="text-sm font-extrabold text-slate-905 border-b pb-3 flex items-center justify-between">
+                      <span className="flex items-center gap-1.5"><DollarSign className="w-4 h-4 text-emerald-500" /> Cash-Out Payout History (উত্তোলন হিস্ট্রি)</span>
+                      <span className="text-[10px] font-bold uppercase text-slate-405">Min: ৳ {affiliateMinWithdrawal}</span>
+                    </h3>
+
+                    {(!loggedAffiliate.withdrawals || loggedAffiliate.withdrawals.length === 0) ? (
+                      <div className="text-center py-10 px-4 space-y-3">
+                        <p className="text-xs text-slate-400 select-none">No cash-out requests created yet by you.</p>
+                        <p className="text-[10.5px] text-slate-500 leading-relaxed max-w-sm mx-auto">
+                          Ready to cash out? Click the green <b>&quot;Payout ➔&quot;</b> button beside your Wallet Balance card above to easily submit your payment info!
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1 pt-2">
+                        {loggedAffiliate.withdrawals.map(wd => (
+                          <div key={wd.id} className="p-3 bg-slate-50 border rounded-2xl flex justify-between items-center text-[11px] hover:bg-slate-100/50 transition-all">
+                            <div className="flex flex-col space-y-0.5">
+                              <span className="font-extrabold text-slate-800 text-xs">৳ {wd.amount} BDT</span>
+                              <span className="text-[10px] text-slate-500 font-mono italic">Method: {wd.method} ({wd.accountNo})</span>
+                              <span className="text-[9px] text-slate-400 font-mono">{wd.date}</span>
+                            </div>
+                            <span className={`text-[9.5px] font-black uppercase px-2.5 py-1 rounded-full ${
+                              wd.status === 'approved' ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' :
+                              wd.status === 'rejected' ? 'bg-red-100 text-red-700 border border-red-200' : 'bg-amber-100 text-amber-700 border border-amber-200'
+                            }`}>
+                              {wd.status}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* PAYOUT REQUEST MODAL (উত্তোলন করুন পপআপ) */}
+              <AnimatePresence>
+                {showPayoutModal && (
+                  <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in" id="payout_request_modal">
+                    <motion.div
+                      initial={{ scale: 0.95, y: 15, opacity: 0 }}
+                      animate={{ scale: 1, y: 0, opacity: 1 }}
+                      exit={{ scale: 0.95, y: 15, opacity: 0 }}
+                      className="bg-white rounded-3xl p-6 shadow-xl border w-full max-w-md relative animate-scale-in"
+                    >
+                      <h3 className="text-base font-black text-slate-900 border-b pb-3 flex items-center gap-1.5 mt-0">
+                        💬 Request Wallet Payout (উত্তোলন ফর্ম)
+                      </h3>
+
+                      <div className="space-y-5 pt-3">
+                        <div>
+                          <label className="block text-[10px] font-black text-slate-400 uppercase mb-1.5 tracking-wider">Payment Provider Method (মাধ্যম)</label>
+                          <div className="grid grid-cols-3 gap-2">
+                            {['bKash', 'Nagad', 'Rocket'].map(provider => (
+                              <button
+                                key={provider}
+                                type="button"
+                                onClick={() => setAffWdMethod(provider as any)}
+                                className={`py-2 px-3 text-xs font-black rounded-xl border-2 transition-all cursor-pointer text-center ${
+                                  affWdMethod === provider ? 'bg-pink-500 border-pink-600 text-white shadow-xs' : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                                }`}
+                              >
+                                {provider}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] font-black text-slate-400 uppercase mb-1 tracking-wider">Account Number (মোবাইল নম্বর)</label>
+                          <input 
+                            type="text"
+                            placeholder="e.g. 018XXXXXXXX"
+                            value={affWdAccount}
+                            onChange={(e) => setAffWdAccount(e.target.value)}
+                            className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-pink-500"
+                          />
+                        </div>
+
+                        <div>
+                          <div className="flex justify-between items-center mb-1">
+                            <label className="block text-[10px] font-black text-slate-400 uppercase tracking-wider">Cashout Amount (টাকার পরিমাণ)</label>
+                            <span className="text-[10px] font-black text-pink-600">Balance: ৳{loggedAffiliate.balance.toFixed(2)}</span>
+                          </div>
+                          <input 
+                            type="number"
+                            min="5"
+                            value={affWdAmount}
+                            onChange={(e) => setAffWdAmount(Number(e.target.value))}
+                            className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-bold focus:outline-none focus:ring-1 focus:ring-pink-500"
+                          />
+                          <p className="text-[10px] text-slate-400 mt-1.5">Minimum payout requirement is ৳ {affiliateMinWithdrawal} BDT</p>
+                        </div>
+
+                        <div className="flex gap-2 pt-2">
+                          <button
+                            type="button"
+                            onClick={() => setShowPayoutModal(false)}
+                            className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-black text-xs py-3.5 rounded-xl text-center cursor-pointer uppercase transition-colors"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!affWdAccount.trim() || affWdAmount <= 0) {
+                                showNotif('Please fill in receiver account and specify cash amount', 'error');
+                                return;
+                              }
+
+                              if (affWdAmount < affiliateMinWithdrawal) {
+                                showNotif(`The minimum allowed cash-out request matches ৳ ${affiliateMinWithdrawal} BDT`, 'error');
+                                return;
+                              }
+
+                              if (loggedAffiliate.balance < affWdAmount) {
+                                showNotif('Insufficient affiliate wallet balance to carry out this cash-out!', 'error');
+                                return;
+                              }
+
+                              const nextWithdrawal = {
+                                id: 'wd_' + Date.now(),
+                                amount: affWdAmount,
+                                method: affWdMethod,
+                                accountNo: affWdAccount.trim(),
+                                date: formatToDhakaTime(),
+                                status: 'pending' as const
+                              };
+
+                              setAffiliateAccounts(prev => prev.map(a => {
+                                if (a.phone === loggedAffiliate.phone) {
+                                  return {
+                                    ...a,
+                                    balance: a.balance - affWdAmount,
+                                    withdrawals: [...(a.withdrawals || []), nextWithdrawal]
+                                  };
+                                }
+                                return a;
+                              }));
+
+                              setLoggedAffiliate(prev => prev ? {
+                                ...prev,
+                                balance: prev.balance - affWdAmount,
+                                withdrawals: [...(prev.withdrawals || []), nextWithdrawal]
+                              } : null);
+
+                              showNotif(`Success! Requested payout has been saved into queue.`, 'success');
+                              setAffWdAccount('');
+                              setShowPayoutModal(false);
+                            }}
+                            className="flex-1 bg-pink-600 hover:bg-pink-700 text-white font-black text-xs py-3.5 rounded-xl text-center cursor-pointer uppercase transition-transform active:scale-98 shadow-sm border-none"
+                          >
+                            Submit Payout
+                          </button>
+                        </div>
+                      </div>
+                    </motion.div>
+                  </div>
+                )}
+              </AnimatePresence>
+
+              {/* MISSION PROOF SUBMISSION POPUP MODAL (টাস্ক প্রুফ সাবমিট পপআপ) */}
+              <AnimatePresence>
+                {showProofSubmitModal && proofTaskId && (
+                  <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in" id="proof_submission_modal">
+                    {(() => {
+                      const activeTask = affiliateTasks.find(t => t.id === proofTaskId);
+                      if (!activeTask) return null;
+                      const reqType = activeTask.requiredProofType || 'both';
+
+                      return (
+                        <motion.div
+                          initial={{ scale: 0.95, y: 15, opacity: 0 }}
+                          animate={{ scale: 1, y: 0, opacity: 1 }}
+                          exit={{ scale: 0.95, y: 15, opacity: 0 }}
+                          className="bg-white rounded-3xl p-6 shadow-xl border w-full max-w-lg relative animate-scale-in"
+                        >
+                          <div className="flex justify-between items-start border-b pb-3 mb-4">
+                            <div>
+                              <span className="text-[9px] uppercase font-black px-2 py-0.5 rounded bg-indigo-50 text-indigo-650 tracking-wide inline-block mb-1">
+                                {activeTask.platform} Task
+                              </span>
+                              <h3 className="text-sm sm:text-base font-black text-slate-900 m-0">
+                                Submit Task Proof (টাস্ক প্রুফ জমা দিন)
+                              </h3>
+                            </div>
+                            <button 
+                              type="button"
+                              onClick={() => {
+                                setShowProofSubmitModal(false);
+                                setProofTaskId(null);
+                              }} 
+                              className="text-slate-450 hover:text-slate-600 bg-slate-100 hover:bg-slate-200 border-none p-1.5 rounded-full cursor-pointer transition-colors"
+                            >
+                              ✕
+                            </button>
+                          </div>
+
+                          <div className="space-y-4">
+                            <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
+                              <h4 className="text-xs font-black text-slate-805 mt-0 mb-1">{activeTask.title}</h4>
+                              <p className="text-[10.5px] text-slate-500 leading-normal mb-0">{activeTask.desc}</p>
+                              <p className="text-xs font-black text-pink-600 mt-2 mb-0">Earning Reward: ৳ {activeTask.reward} BDT</p>
+                            </div>
+
+                            <div className="space-y-3.5">
+                              {(reqType === 'link' || reqType === 'both') && (
+                                <div>
+                                  <label className="block text-[10.5px] font-black text-slate-700 mb-1">
+                                    Proof Link / URL <span className="text-red-500">*</span>
+                                  </label>
+                                  <input 
+                                    type="text"
+                                    placeholder="e.g. https://www.facebook.com/yourprofile/posts/101"
+                                    value={proofSubmitLink}
+                                    onChange={(e) => setProofSubmitLink(e.target.value)}
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-pink-500"
+                                  />
+                                  <p className="text-[9.5px] text-slate-400 mt-1 font-medium">Please provide the complete URL/link showing your submission.</p>
+                                </div>
+                              )}
+
+                              {(reqType === 'screenshot' || reqType === 'both') && (
+                                <div>
+                                  <label className="block text-[10.5px] font-black text-slate-700 mb-1">
+                                    Upload Task Screenshot (স্ক্রিনশট আপলোড করুন) <span className="text-red-500">*</span>
+                                  </label>
+                                  
+                                  {proofSubmitScreenshot ? (
+                                    <div className="border border-slate-205 rounded-xl p-3 bg-slate-50 flex items-center justify-between gap-3 text-left">
+                                      <div className="flex items-center gap-2.5">
+                                        <div className="w-12 h-12 rounded-lg bg-pink-50 border border-pink-100 overflow-hidden flex items-center justify-center p-0.5 shrink-0">
+                                          <img 
+                                            src={proofSubmitScreenshot} 
+                                            alt="Uploaded proof" 
+                                            className="max-w-full max-h-full object-cover rounded" 
+                                          />
+                                        </div>
+                                        <div>
+                                          <p className="text-[10px] font-black text-slate-700 leading-tight">Screenshot Loaded</p>
+                                          <p className="text-[9px] text-emerald-600 font-bold mt-0.5 leading-none">Ready for validation</p>
+                                        </div>
+                                      </div>
+                                      <button 
+                                        type="button" 
+                                        onClick={() => setProofSubmitScreenshot('')}
+                                        className="text-[9.5px]/none font-black text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 py-1.5 px-3 rounded-lg border border-rose-200 cursor-pointer transition-colors"
+                                      >
+                                        Remove
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <div className="relative border-2 border-dashed border-slate-200 hover:border-pink-400 rounded-xl p-5 bg-slate-50/70 text-center hover:bg-slate-50 transition-all cursor-pointer">
+                                      <input 
+                                        type="file"
+                                        accept="image/*"
+                                        onChange={(e) => {
+                                          const file = e.target.files?.[0];
+                                          if (file) {
+                                            const reader = new FileReader();
+                                            reader.onloadend = () => {
+                                              const base64Str = reader.result as string;
+                                              const img = new Image();
+                                              img.src = base64Str;
+                                              img.onload = () => {
+                                                const canvas = document.createElement('canvas');
+                                                let width = img.width;
+                                                let height = img.height;
+                                                const MAX_DIM = 850;
+                                                if (width > height) {
+                                                  if (width > MAX_DIM) {
+                                                    height *= MAX_DIM / width;
+                                                    width = MAX_DIM;
+                                                  }
+                                                } else {
+                                                  if (height > MAX_DIM) {
+                                                    width *= MAX_DIM / height;
+                                                    height = MAX_DIM;
+                                                  }
+                                                }
+                                                canvas.width = width;
+                                                canvas.height = height;
+                                                const ctx = canvas.getContext('2d');
+                                                if (ctx) {
+                                                  ctx.drawImage(img, 0, 0, width, height);
+                                                  setProofSubmitScreenshot(canvas.toDataURL('image/jpeg', 0.6));
+                                                } else {
+                                                  setProofSubmitScreenshot(base64Str);
+                                                }
+                                              };
+                                            };
+                                            reader.readAsDataURL(file);
+                                          }
+                                        }}
+                                        className="absolute inset-0 opacity-0 cursor-pointer w-full h-full z-10"
+                                      />
+                                      <Camera className="w-5 h-5 text-slate-400 mx-auto mb-1.5" />
+                                      <p className="text-[10.5px] font-black text-slate-700 leading-tight">Click/Drag screenshot to Upload</p>
+                                      <p className="text-[9px] text-slate-400 mt-1">PNG, JPG, JPEG files accepted</p>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+
+                              <div>
+                                <label className="block text-[10.5px] font-black text-slate-700 mb-1">
+                                  Channel Username or Additional Notes (ঐচ্ছিক তথ্য)
+                                </label>
+                                <textarea
+                                  value={proofText}
+                                  onChange={(e) => setProofText(e.target.value)}
+                                  placeholder="Type username, account name or other verification comments..."
+                                  className="w-full h-16 text-xs font-semibold p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-1 focus:ring-pink-500 resize-none"
+                                />
+                              </div>
+                            </div>
+
+                            <div className="flex gap-2.5 pt-3 border-t">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setShowProofSubmitModal(false);
+                                  setProofTaskId(null);
+                                }}
+                                className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold text-xs py-3 rounded-xl text-center cursor-pointer border-none"
+                              >
+                                Cancel (বাতিল)
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (reqType === 'link' || reqType === 'both') {
+                                    if (!proofSubmitLink.trim()) {
+                                      showNotif('Please provide the required proof link first!', 'error');
+                                      return;
+                                    }
+                                  }
+                                  if (reqType === 'screenshot' || reqType === 'both') {
+                                    if (!proofSubmitScreenshot.trim()) {
+                                      showNotif('Please provide the required screenshot URL first!', 'error');
+                                      return;
+                                    }
+                                  }
+
+                                  const legacyCombinedProof = [
+                                    proofSubmitLink.trim() && `Link: ${proofSubmitLink.trim()}`,
+                                    proofSubmitScreenshot.trim() && `Screenshot: ${proofSubmitScreenshot.trim()}`,
+                                    proofText.trim() && `Note: ${proofText.trim()}`
+                                  ].filter(Boolean).join(' | ');
+
+                                  const newSub: AffiliateSubmission = {
+                                    id: 'sub_' + Date.now(),
+                                    taskId: activeTask.id,
+                                    userPhone: loggedAffiliate.phone,
+                                    userName: loggedAffiliate.name,
+                                    taskTitle: activeTask.title,
+                                    reward: activeTask.reward,
+                                    proof: legacyCombinedProof,
+                                    submissionLink: proofSubmitLink.trim(),
+                                    submissionScreenshot: proofSubmitScreenshot.trim(),
+                                    status: 'pending',
+                                    date: formatToDhakaTime()
+                                  };
+
+                                  setAffiliateSubmissions(prev => [...prev, newSub]);
+                                  showNotif('Proof submitted into verification loop successfully!', 'success');
+                                  
+                                  setShowProofSubmitModal(false);
+                                  setProofTaskId(null);
+                                  setProofSubmitLink('');
+                                  setProofSubmitScreenshot('');
+                                  setProofText('');
+                                }}
+                                className="flex-1 bg-pink-600 hover:bg-pink-750 text-white font-black text-xs py-3 rounded-xl text-center cursor-pointer shadow-xs border-none"
+                              >
+                                Confirm & Submit (জমা দিন)
+                              </button>
+                            </div>
+                          </div>
+                        </motion.div>
+                      );
+                    })()}
+                  </div>
+                )}
+              </AnimatePresence>
+
+              {/* TRAFFIC CLICKS HIT LOG */}
+              <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-3xs space-y-3 select-none" id="affiliate_traffic_history">
+                <h4 className="text-sm font-extrabold text-slate-900 border-b pb-3 flex items-center gap-1.5">
+                  <Clock className="w-4 h-4 text-pink-500" /> Click Traffic Audit History (ভিজিটর ক্লিক ও আইপি হিস্ট্রি)
+                </h4>
+                {loggedAffiliate.clicksList?.length === 0 ? (
+                  <p className="text-center text-xs py-8 text-slate-400">No visitors have clicked your tracking links yet.</p>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 max-h-[220px] overflow-y-auto pr-1">
+                    {loggedAffiliate.clicksList.map((clk, clIdx) => (
+                      <div key={clIdx} className="p-2.5 bg-slate-50 border rounded-xl flex items-center justify-between text-[11px]">
+                        <div className="flex flex-col">
+                          <code className="font-mono text-xs font-bold text-slate-700">{clk.ip}</code>
+                          <span className="text-[9.5px] text-slate-400 mt-0.5">{clk.date}</span>
+                        </div>
+                        <span className="text-[9px] font-black uppercase text-emerald-600 bg-emerald-50 px-2.5 py-0.5 rounded-full">Valid</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </main>
       ) : showShopPage && !viewingProduct ? (
         <main className="flex-1 max-w-[1550px] mx-auto w-full px-0 sm:px-4 py-0 sm:py-8 md:py-10 animate-fade-in text-slate-800">
           <div className="bg-white rounded-none sm:rounded-[24px] border-0 sm:border sm:border-slate-100 shadow-none sm:shadow-xs p-4 sm:p-6 relative overflow-hidden">
             
-            {/* Custom search filter inside Shop page */}
-            <div className="bg-slate-50/50 p-4 rounded-2xl border border-slate-100 gap-3 flex flex-col sm:flex-row sm:items-center justify-between mt-6">
-              <span className="text-xs font-black text-slate-650 flex items-center gap-2">
-                <ShoppingBag className="w-4 h-4 text-emerald-555 text-emerald-500" />
-                <span>Showing {products.filter(p => p.inStock).length} premium quality verified products</span>
+            {/* Custom search status label inside Shop page */}
+            <div className="flex items-center justify-between mt-2 mb-4 border-b pb-3 border-slate-100">
+              <span className="text-[11px] font-extrabold text-slate-500 flex items-center gap-1.5 uppercase tracking-wider">
+                <ShoppingBag className="w-3.5 h-3.5 text-pink-555 text-pink-500 animate-pulse" />
+                <span>Verified products</span>
               </span>
-              <div className="w-full sm:w-64 relative">
-                <input 
-                  type="text"
-                  placeholder="Filtering active products..."
-                  value={searchInput}
-                  onChange={(e) => setSearchInput(e.target.value)}
-                  className="w-full bg-white border border-slate-200 focus:border-emerald-500 text-slate-800 rounded-xl px-3.5 py-1.5 text-xs focus:outline-none transition-all font-semibold"
-                />
-              </div>
+              {searchInput && (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] bg-pink-50 text-pink-600 font-bold px-2 py-0.5 rounded-lg border border-pink-150">"{searchInput}"</span>
+                  <button 
+                    onClick={() => setSearchInput('')}
+                    className="text-[9px] font-black text-slate-400 hover:text-slate-600 underline cursor-pointer"
+                  >
+                    Clear Filter
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Product list grid showing ALL active products without category pre-selection */}
@@ -4289,7 +5757,7 @@ export default function CustomerStore({
           <div className="bg-white rounded-none sm:rounded-[24px] border-0 sm:border sm:border-slate-100 shadow-none sm:shadow-xs p-4 sm:p-6 relative overflow-hidden">
             
             {/* Header / Title */}
-            <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-6">
+            <div className="hidden md:flex items-center justify-between border-b border-slate-100 pb-4 mb-6">
               <div className="flex items-center gap-2.5">
                 <button 
                   onClick={() => setShowAllFlashOffers(false)}
@@ -4654,6 +6122,199 @@ export default function CustomerStore({
             </div>
           </div>
         </main>
+      ) : selectedStoreSellerName && !viewingProduct ? (
+        <main className="flex-1 max-w-[1550px] mx-auto w-full px-4 py-6 md:py-10 animate-fade-in text-slate-800">
+          {/* SELLER STORE DETAILED PAGE */}
+          {(() => {
+            const name = selectedStoreSellerName;
+            const stats = getSellerStats(name);
+            const isFollowing = storeFollowers.includes(name);
+
+            // Filter products belonging to this seller
+            const storeProducts = products.filter(p => p.inStock && (
+              (selectedStoreSellerId && p.sellerId === selectedStoreSellerId) || 
+              (p.sellerName && p.sellerName === name)
+            ));
+
+            // Filtering by search inside the store
+            const filteredStoreProducts = storeProducts.filter(p => 
+              p.name.toLowerCase().includes(storeSearchQuery.toLowerCase())
+            );
+
+            return (
+              <div className="space-y-6">
+                {/* Store Header Card */}
+                <div className="bg-white border border-slate-200/80 rounded-3xl p-4 sm:p-6 shadow-sm relative overflow-hidden text-left py-6">
+                  
+                  <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-5">
+                    <div className="flex items-center gap-4">
+                      <div className="relative">
+                        <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-pink-50 to-pink-100 border border-pink-200 text-pink-600 flex items-center justify-center font-black shadow-3xs">
+                          <Store className="w-8 h-8 text-pink-500" />
+                        </div>
+                        <span className="absolute -bottom-1 -right-1 w-5 h-5 bg-emerald-500 text-white rounded-full flex items-center justify-center text-[10px] font-black border-2 border-white">✓</span>
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <h2 className="text-lg sm:text-2xl font-black text-slate-900 tracking-tight leading-none">{name}</h2>
+                          <span className="bg-emerald-50 text-emerald-700 text-[10px] font-black uppercase px-2 py-0.5 rounded-md flex items-center gap-0.5 border border-emerald-100">
+                            Verified Seller
+                          </span>
+                        </div>
+                        <p className="text-xs sm:text-sm text-pink-600 font-extrabold mt-1.5 flex items-center gap-1">
+                          <Star className="w-3.5 h-3.5 fill-current text-amber-400" />
+                          <span>{stats.rating}% {lang === 'en' ? 'Positive Feedback' : 'পজিটিভ সেলার ফিডব্যাক'}</span>
+                          <span className="text-slate-300">|</span>
+                          <span>{stats.followersStr} {lang === 'en' ? 'Followers' : 'ফলোয়ার'}</span>
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 w-full md:w-auto">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const shopperId = loggedCustomer?.id || 'guest_shopper';
+                          if (isFollowing) {
+                            setStoreFollowers(prev => prev.filter(f => f !== name));
+                            if (setUsers) {
+                              setUsers(prevUsers => prevUsers.map(u => {
+                                if (u.role === 'seller' && (u.name === name || u.kyc?.nidName === name)) {
+                                  const list = u.sellerFollowersList || [];
+                                  return { ...u, sellerFollowersList: list.filter(id => id !== shopperId) };
+                                }
+                                return u;
+                              }));
+                            }
+                            showNotif(lang === 'en' ? `Unfollowed ${name}` : `${name} কে আনফলো করা হয়েছে`, 'success');
+                          } else {
+                            setStoreFollowers(prev => [...prev, name]);
+                            if (setUsers) {
+                              setUsers(prevUsers => prevUsers.map(u => {
+                                if (u.role === 'seller' && (u.name === name || u.kyc?.nidName === name)) {
+                                  const list = u.sellerFollowersList || [];
+                                  const newList = list.includes(shopperId) ? list : [...list, shopperId];
+                                  return { ...u, sellerFollowersList: newList };
+                                }
+                                return u;
+                              }));
+                            }
+                            showNotif(lang === 'en' ? `Now following ${name}!` : `${name} কে ফলো করা হয়েছে!`, 'success');
+                          }
+                        }}
+                        className={`flex-1 md:flex-initial text-xs font-black py-2.5 px-5 rounded-xl border transition-all cursor-pointer ${isFollowing ? 'bg-slate-100 border-slate-200 text-slate-500' : 'bg-pink-50 text-pink-600 border-pink-150 hover:bg-pink-100'}`}
+                      >
+                        {isFollowing ? (lang === 'en' ? '✓ Following' : '✓ ফলো করছেন') : (lang === 'en' ? 'Follow Store' : 'স্টোর ফলো করুন')}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={goHome}
+                        className="flex-1 md:flex-initial text-xs font-black py-2.5 px-5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white transition-all cursor-pointer text-center"
+                      >
+                        {lang === 'en' ? 'Back to Marketplace' : 'মার্কেটপ্লেসে ফিরুন'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Store Performance Summary */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 border-t border-slate-100 pt-5 mt-5">
+                    <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-100">
+                      <p className="text-sm font-black text-slate-800">{stats.rating}% ({stats.level})</p>
+                      <p className="text-xs text-slate-400 font-bold mt-1.5">{lang === 'en' ? 'Seller Ratings' : 'পজিটিভ সেলার রেটিং'}</p>
+                    </div>
+                    <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-100">
+                      <p className="text-sm font-black text-rose-600">{stats.shipOnTime}%</p>
+                      <p className="text-xs text-slate-400 font-bold mt-1.5">{lang === 'en' ? 'Ship on Time' : 'সময়মতো অর্ডার ডেলিভারি'}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Search & Filter Row */}
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-4 bg-white border border-slate-200 p-4 rounded-2xl text-left">
+                  <div>
+                    <h3 className="font-extrabold text-slate-800 text-sm">{lang === 'en' ? 'Products from this Store' : 'এই স্টোরের পণ্যসমূহ'} ({storeProducts.length})</h3>
+                    <p className="text-[11px] text-slate-400 font-bold">{lang === 'en' ? 'Authentic quality goods shipped directly' : 'সরাসরি স্টোর থেকে গুণগত মান নিশ্চিত করে পাঠানো পণ্য'}</p>
+                  </div>
+
+                  {/* Store specific search bar */}
+                  <div className="relative w-full sm:w-72">
+                    <input 
+                      type="text" 
+                      placeholder={lang === 'en' ? 'Search in store...' : 'স্টোরের মধ্যে খুঁজুন...'}
+                      value={storeSearchQuery}
+                      onChange={(e) => setStoreSearchQuery(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 hover:border-slate-300 focus:border-pink-500 rounded-xl py-2 px-3 pl-9 text-xs transition-all font-medium text-slate-800 outline-none"
+                    />
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  </div>
+                </div>
+
+                {/* Store Products Grid */}
+                {filteredStoreProducts.length === 0 ? (
+                  <div className="bg-white p-12 rounded-3xl border text-center">
+                    <ShoppingBag className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+                    <p className="text-xs font-bold text-slate-500">{lang === 'en' ? 'No products match your search inside this store.' : 'এই স্টোরে আপনার সার্চের সাথে মিলে এমন কোনো পণ্য পাওয়া যায়নি।'}</p>
+                    {storeSearchQuery && (
+                      <button 
+                        onClick={() => setStoreSearchQuery('')}
+                        className="mt-3 text-pink-600 hover:text-pink-700 font-black text-xs hover:underline cursor-pointer"
+                      >
+                        {lang === 'en' ? 'Clear search filter' : 'সার্চ ফিল্টার মুছুন'}
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 col-span-full">
+                    {filteredStoreProducts.map(prod => {
+                      const sPct = prod.originalPrice > 0 ? Math.round(((prod.originalPrice - prod.discountPrice) / prod.originalPrice) * 100) : 0;
+                      return (
+                        <div 
+                          key={prod.id}
+                          onClick={() => {
+                            setViewingProduct(prod);
+                            setActiveDetailImage(prod.img);
+                            window.scrollTo({ top: 0, behavior: 'smooth' });
+                          }}
+                          className="group bg-white rounded-2xl border border-slate-250 p-3 flex flex-col justify-between transition-all duration-300 hover:shadow-md hover:border-pink-200 cursor-pointer relative overflow-hidden text-left"
+                        >
+                          {sPct > 0 && (
+                            <div className="absolute top-2.5 left-2.5 bg-gradient-to-r from-pink-500 to-rose-600 text-white font-black text-[9.5px] px-2 py-0.5 rounded-lg z-10 shadow-xs">
+                              -{sPct}% OFF
+                            </div>
+                          )}
+                          <div className="bg-slate-50 rounded-xl p-2 h-[120px] sm:h-[150px] flex items-center justify-center overflow-hidden mb-2 relative">
+                            <img 
+                              src={prod.img} 
+                              alt={prod.name} 
+                              className="max-h-full max-w-full object-contain transition-transform duration-300 group-hover:scale-105" 
+                              referrerPolicy="no-referrer"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            {/* Category Tag */}
+                            <span className="text-[8.5px] font-black text-slate-400 tracking-wider uppercase">
+                              {categories.find(c => c.id === prod.catId)?.name || 'General'}
+                            </span>
+                            <h4 className="text-[11.5px] sm:text-xs font-black text-slate-800 group-hover:text-pink-600 transition-colors line-clamp-2 min-h-[32px] leading-tight">
+                              {prod.name}
+                            </h4>
+                            <div className="flex items-baseline gap-1.5 pt-1">
+                              <span className="font-mono text-xs sm:text-sm font-extrabold text-pink-600">৳{prod.discountPrice}</span>
+                              {prod.originalPrice > prod.discountPrice && (
+                                <span className="font-mono text-[9px] sm:text-2xs text-slate-450 line-through font-bold">৳{prod.originalPrice}</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+        </main>
       ) : (
         <main className={`flex-1 max-w-[1550px] mx-auto w-full px-4 py-6 md:py-10 ${viewingProduct || selectedOffer ? 'grid grid-cols-1 lg:grid-cols-4 gap-8' : 'space-y-8'} text-slate-800`}>
           
@@ -4749,9 +6410,11 @@ export default function CustomerStore({
                     
                     <div className="flex items-center gap-1.5 mb-3">
                       <div className="flex text-amber-400">
-                        {[1,2,3,4,5].map(x => <Star key={x} className="w-3 h-3 fill-current" />)}
+                        {[1,2,3,4,5].map(x => (
+                          <Star key={x} className="w-3 h-3 fill-current" />
+                        ))}
                       </div>
-                      <span className="text-[10px] sm:text-xs text-slate-400 font-bold">({viewingProduct.sales} reviews)</span>
+                      <span className="text-[10px] sm:text-xs text-slate-400 font-bold">({viewingProduct.sales || 12} reviews)</span>
                     </div>
 
                     {/* Pricing Badge */}
@@ -4823,7 +6486,7 @@ export default function CustomerStore({
                         onClick={() => handleBuyNow(viewingProduct, qty, selectedColor)}
                         className="flex-1 bg-gradient-to-r from-pink-500 to-indigo-600 hover:from-pink-600 hover:to-indigo-700 text-white font-black py-2.5 rounded-xl text-xs transition-all shadow-md shadow-pink-500/10 flex items-center justify-center gap-1 cursor-pointer"
                       >
-                        Buy Now Direct
+                        {lang === 'bn' ? 'এখনই কিনুন' : 'Buy Now'}
                       </button>
                     </div>
 
@@ -4839,6 +6502,97 @@ export default function CustomerStore({
                       </div>
                     </div>
 
+                    {/* Seller Store Widget */}
+                    {(() => {
+                      const sellerName = viewingProduct.sellerName || 'Orivian Official Store';
+                      const sellerId = viewingProduct.sellerId || 'official';
+                      const stats = getSellerStats(sellerName);
+                      const isFollowing = storeFollowers.includes(sellerName);
+
+                      return (
+                        <div className="bg-slate-50/70 border border-slate-150 rounded-2xl p-3.5 mt-4 text-left shadow-2xs">
+                          {/* Store Info Row */}
+                          <div className="flex items-center justify-between gap-3 mb-2.5">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <div className="relative shrink-0 flex">
+                                <div className="w-9 h-9 rounded-xl bg-pink-50 text-pink-600 flex items-center justify-center font-black border border-pink-100">
+                                  <Store className="w-4.5 h-4.5 text-pink-500" />
+                                </div>
+                                <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-emerald-500 text-white rounded-full flex items-center justify-center text-[7.5px] font-black border border-white">✓</span>
+                              </div>
+                              <div className="min-w-0 text-left">
+                                <h4 className="text-xs font-black text-slate-800 leading-tight flex items-center gap-1 truncate">
+                                  <span>{sellerName}</span>
+                                </h4>
+                                <p className="text-[10px] text-pink-600 font-extrabold mt-0.5 leading-none">
+                                  {stats.rating}% {lang === 'en' ? 'Seller Ratings' : 'সেলার রেটিং'}
+                                </p>
+                              </div>
+                            </div>
+
+                            {/* View & Follow actions */}
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const shopperId = loggedCustomer?.id || 'guest_shopper';
+                                  if (isFollowing) {
+                                    setStoreFollowers(prev => prev.filter(f => f !== sellerName));
+                                    if (setUsers) {
+                                      setUsers(prevUsers => prevUsers.map(u => {
+                                        if (u.role === 'seller' && (u.name === sellerName || u.kyc?.nidName === sellerName)) {
+                                          const list = u.sellerFollowersList || [];
+                                          return { ...u, sellerFollowersList: list.filter(id => id !== shopperId) };
+                                        }
+                                        return u;
+                                      }));
+                                    }
+                                    showNotif(lang === 'en' ? `Unfollowed ${sellerName}` : `${sellerName} কে আনফলো করা হয়েছে`, 'success');
+                                  } else {
+                                    setStoreFollowers(prev => [...prev, sellerName]);
+                                    if (setUsers) {
+                                      setUsers(prevUsers => prevUsers.map(u => {
+                                        if (u.role === 'seller' && (u.name === sellerName || u.kyc?.nidName === sellerName)) {
+                                          const list = u.sellerFollowersList || [];
+                                          const newList = list.includes(shopperId) ? list : [...list, shopperId];
+                                          return { ...u, sellerFollowersList: newList };
+                                        }
+                                        return u;
+                                      }));
+                                    }
+                                    showNotif(lang === 'en' ? `Now following ${sellerName}!` : `${sellerName} কে ফলো করা হয়েছে!`, 'success');
+                                  }
+                                }}
+                                className={`text-[9.5px] font-black py-1 px-2.5 rounded-lg border transition-all cursor-pointer ${isFollowing ? 'bg-slate-150 border-slate-200 text-slate-600' : 'bg-pink-100 text-pink-600 border-pink-200 hover:bg-pink-200'}`}
+                              >
+                                {isFollowing ? (lang === 'en' ? 'Following' : 'ফলো করছেন') : (lang === 'en' ? 'Follow' : 'ফলো করুন')}
+                              </button>
+                              
+                              <button
+                                type="button"
+                                onClick={() => handleVisitStore(sellerName, sellerId)}
+                                className="bg-[#f43f5e] hover:bg-rose-600 text-white font-extrabold text-[9.5px] py-1 px-2.5 rounded-lg flex items-center gap-1 transition-all shadow-xs cursor-pointer"
+                              >
+                                {lang === 'en' ? 'Visit Store' : 'স্টোর ভিজিট'}
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Stats division grid */}
+                          <div className="grid grid-cols-2 border-t border-slate-200/60 pt-2.5 mt-2.5 text-center bg-white/40 rounded-xl p-2 border border-slate-100">
+                            <div className="border-r border-slate-150 text-left pl-1">
+                              <p className="text-[11px] sm:text-[11.5px] font-black text-slate-800 leading-none">{stats.rating}%</p>
+                              <p className="text-[8.5px] text-slate-400 font-bold mt-1 leading-tight">{lang === 'en' ? 'Positive Ratings' : 'পজিটিভ রেটিং'}</p>
+                            </div>
+                            <div className="text-left pl-2">
+                              <p className="text-[11px] sm:text-[11.5px] font-black text-rose-600 leading-none">{stats.shipOnTime}%</p>
+                              <p className="text-[8.5px] text-slate-400 font-bold mt-1 leading-tight">{lang === 'en' ? 'Ship On Time' : 'সময়মতো শিপ'}</p>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
+
                   </div>
                 </div>
 
@@ -4849,6 +6603,81 @@ export default function CustomerStore({
                     {viewingProduct.description}
                   </p>
                 </div>
+
+                {/* More from Store (এই স্টোর থেকে আরও পণ্য) */}
+                {(() => {
+                  const sellerName = viewingProduct.sellerName || 'Orivian Official Store';
+                  // Get products from the same seller, excluding current viewing product
+                  let sameStoreProducts = products.filter(p => p.id !== viewingProduct.id && p.inStock && (
+                    (viewingProduct.sellerId && p.sellerId === viewingProduct.sellerId) || 
+                    (p.sellerName && p.sellerName === viewingProduct.sellerName)
+                  ));
+                  
+                  if (sameStoreProducts.length === 0) {
+                    sameStoreProducts = products.filter(p => p.id !== viewingProduct.id && p.inStock && p.catId === viewingProduct.catId);
+                  }
+                  
+                  if (sameStoreProducts.length === 0) return null;
+
+                  return (
+                    <div className="border-t border-slate-100 mt-8 pt-6">
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="font-extrabold text-slate-900 text-sm sm:text-base uppercase tracking-tight flex items-center gap-2">
+                          <Store className="w-4 h-4 text-pink-500" /> More From Store (এই স্টোর থেকে আরও পণ্য)
+                        </h3>
+                        <button
+                          type="button"
+                          onClick={() => handleVisitStore(sellerName, viewingProduct.sellerId || null)}
+                          className="text-pink-600 hover:text-pink-700 font-extrabold text-xs flex items-center gap-1 cursor-pointer hover:underline"
+                        >
+                          {lang === 'en' ? 'View All Store Products' : 'সব পণ্য দেখুন'} →
+                        </button>
+                      </div>
+                      
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+                        {sameStoreProducts.slice(0, 4).map(prod => {
+                          const sPct = prod.originalPrice > 0 ? Math.round(((prod.originalPrice - prod.discountPrice) / prod.originalPrice) * 100) : 0;
+                          return (
+                            <div 
+                              key={prod.id}
+                              onClick={() => {
+                                setViewingProduct(prod);
+                                setActiveDetailImage(prod.img);
+                                window.scrollTo({ top: 0, behavior: 'smooth' });
+                              }}
+                              className="group bg-white rounded-2xl border border-slate-150 p-2.5 flex flex-col justify-between transition-all duration-300 hover:shadow-md hover:border-pink-200 cursor-pointer relative overflow-hidden"
+                            >
+                              {sPct > 0 && (
+                                <div className="absolute top-2 left-2 bg-gradient-to-r from-pink-500 to-rose-600 text-white font-black text-[9.5px] px-2 py-0.5 rounded-lg z-10 shadow-xs">
+                                  -{sPct}% OFF
+                                </div>
+                              )}
+                              <div className="bg-slate-50 rounded-xl p-2 h-[100px] sm:h-[130px] flex items-center justify-center overflow-hidden mb-2 relative">
+                                <img 
+                                  src={prod.img} 
+                                  alt={prod.name} 
+                                  className="max-h-full max-w-full object-contain transition-transform duration-300 group-hover:scale-105" 
+                                  referrerPolicy="no-referrer"
+                                />
+                              </div>
+                              <div>
+                                <h4 className="text-[11px] sm:text-xs font-black text-slate-700 group-hover:text-pink-600 transition-colors line-clamp-2 min-h-[30px] text-left leading-tight">
+                                  {prod.name}
+                                </h4>
+                                <div className="flex items-baseline gap-1.5 mt-1">
+                                  <span className="font-mono text-xs sm:text-sm font-extrabold text-pink-600">৳{prod.discountPrice}</span>
+                                  {prod.originalPrice > prod.discountPrice && (
+                                    <span className="font-mono text-[9px] sm:text-2xs text-slate-450 line-through font-bold">৳{prod.originalPrice}</span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* Recommend for You Section */}
                 <div className="border-t border-slate-100 mt-8 pt-6">
@@ -4879,68 +6708,15 @@ export default function CustomerStore({
                                 viewDetails(prod);
                                 window.scrollTo({ top: 0, behavior: 'smooth' });
                               }}
-                              className="bg-white rounded-2xl border border-slate-200/50 hover:shadow-lg hover:border-slate-200 transition-all p-3 flex flex-col group cursor-pointer relative justify-between sm:hover:scale-[1.01]"
+                              className="bg-white rounded-2xl border border-slate-205/60 hover:shadow-md hover:border-slate-300 transition-all p-3 flex flex-col group cursor-pointer relative justify-between sm:hover:scale-[1.01]"
                             >
-                              {/* Favorite Button */}
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  const isFav = favorites.includes(prod.id);
-                                  if (isFav) {
-                                    setFavorites(prev => prev.filter(id => id !== prod.id));
-                                    showNotif("Removed from Favorites", "success");
-                                  } else {
-                                    setFavorites(prev => [...prev, prod.id]);
-                                    showNotif("Added to Favorites", "success");
-                                  }
-                                }}
-                                className="absolute top-2 right-2 w-7 h-7 bg-white/90 backdrop-blur-xs rounded-full flex items-center justify-center shadow-2xs hover:bg-white z-20 cursor-pointer border border-slate-100 transition-colors"
-                              >
-                                <Heart className={`w-3.5 h-3.5 ${favorites.includes(prod.id) ? 'fill-red-500 text-red-500' : 'text-slate-400'}`} />
-                              </button>
-
                               <div>
-                                {/* Image aspect wrap */}
-                                <div className="aspect-square bg-slate-50 group-hover:bg-slate-100/50 rounded-xl overflow-hidden flex items-center justify-center p-1 sm:p-2 transition-colors relative">
-                                  {prod.isFlash ? (
-                                    <>
-                                      <div className="absolute top-1.5 left-1.5 flex flex-col gap-1 z-10 items-start">
-                                        {flashOfferSettings.filter(item => item.isActive && item.type !== 'discount').map(offer => (
-                                          <span 
-                                            key={offer.id} 
-                                            className="font-black text-[7px] px-1 py-0.5 rounded uppercase tracking-wide flex items-center gap-0.5 shadow-3xs font-sans"
-                                            style={{ backgroundColor: offer.bgColor || '#10b981', color: offer.textColor || '#ffffff' }}
-                                          >
-                                            {offer.value}
-                                          </span>
-                                        ))}
-                                      </div>
-                                      {sPct > 0 && (
-                                        <span 
-                                          className="absolute bottom-1.5 right-1.5 font-extrabold text-[9px] px-1.5 py-0.5 rounded-full z-10 shadow-xs uppercase tracking-tight bg-[#fbbf24] text-slate-900 font-sans"
-                                          style={{ 
-                                            backgroundColor: flashOfferSettings.find(item => item.type === 'discount')?.isActive 
-                                              ? (flashOfferSettings.find(item => item.type === 'discount')?.bgColor || '#fbbf24') 
-                                              : '#fbbf24', 
-                                            color: flashOfferSettings.find(item => item.type === 'discount')?.isActive 
-                                              ? (flashOfferSettings.find(item => item.type === 'discount')?.textColor || '#1a1a1a') 
-                                              : '#1a1a1a' 
-                                          }}
-                                        >
-                                          {flashOfferSettings.find(item => item.type === 'discount')?.isActive 
-                                            ? `${flashOfferSettings.find(item => item.type === 'discount')?.value}` 
-                                            : `-${sPct}% OFF`}
-                                        </span>
-                                      )}
-                                    </>
-                                  ) : (
-                                    sPct > 0 && (
-                                      <span className="absolute top-1.5 left-1.5 bg-gradient-to-r from-red-500 to-amber-500 text-white font-black text-[8px] px-1.5 py-0.5 rounded-md z-10 shadow-xs uppercase tracking-wider">
-                                        {sPct}% OFF
-                                      </span>
-                                    )
+                                <div className="aspect-square bg-slate-50/55 rounded-xl overflow-hidden flex items-center justify-center p-1.5 relative">
+                                  {sPct > 0 && (
+                                    <span className="absolute top-1.5 left-1.5 bg-gradient-to-r from-red-500 to-amber-500 text-white font-black text-[8px] px-1.5 py-0.5 rounded-md z-10 shadow-xs uppercase tracking-wider font-sans">
+                                      {sPct}% OFF
+                                    </span>
                                   )}
-
                                   <img 
                                     src={prod.img} 
                                     alt={prod.name} 
@@ -4948,27 +6724,21 @@ export default function CustomerStore({
                                     referrerPolicy="no-referrer"
                                   />
                                 </div>
-
-                                {/* Content items */}
-                                <div className="p-2 flex flex-col flex-1 mt-2 text-left">
-                                  <h4 className="font-extrabold text-slate-850 text-slate-800 text-xs md:text-xs leading-tight line-clamp-2 min-h-[32px] group-hover:text-pink-500 transition-colors">
+                                <div className="p-1 flex flex-col mt-2 text-left">
+                                  <h4 className="font-extrabold text-slate-800 text-[11px] leading-tight line-clamp-2 min-h-[28px] group-hover:text-pink-500 transition-colors">
                                     {prod.name}
                                   </h4>
-                                  
-                                  <div className="flex items-center gap-1 mt-1 mb-2">
-                                    <span className="text-[10px] font-extrabold text-amber-500 flex items-center gap-0.5">
-                                      ★ {prod.rating}
-                                    </span>
-                                    <span className="text-[9px] text-slate-400">({prod.sales})</span>
+                                  <div className="flex items-center gap-1 mt-0.5">
+                                    <span className="text-[9.5px] font-black text-amber-500">★ {prod.rating}</span>
+                                    <span className="text-[8.5px] text-slate-400">({prod.sales})</span>
                                   </div>
                                 </div>
                               </div>
-
-                              <div className="mt-auto flex justify-between items-end mt-2.5">
+                              <div className="flex justify-between items-end mt-2">
                                 <div>
-                                  <span className="text-pink-650 font-black text-xs sm:text-[13px] block text-pink-600">৳{prod.discountPrice}</span>
-                                  {prod.originalPrice > prod.discountPrice && (
-                                    <span className="text-[10px] text-slate-400 line-through">৳{prod.originalPrice}</span>
+                                  <span className="text-pink-600 font-extrabold text-xs block">৳{prod.discountPrice}</span>
+                                  {sPct > 0 && (
+                                    <span className="text-[9px] text-slate-400 line-through">৳{prod.originalPrice}</span>
                                   )}
                                 </div>
                                 <button 
@@ -4978,9 +6748,9 @@ export default function CustomerStore({
                                     addToCart(prod, 1, prod.colors[0] || '');
                                     showNotif(`Added ${prod.name} to Cart.`, "success");
                                   }}
-                                  className="p-1.5 bg-pink-50 hover:bg-pink-500 hover:text-white rounded-lg text-pink-500 transition-all active:scale-95 border border-pink-200 cursor-pointer"
+                                  className="p-1.5 bg-pink-50 hover:bg-pink-500 hover:text-white rounded-lg text-pink-500 transition-all border border-pink-205 cursor-pointer"
                                 >
-                                  <ShoppingCart className="w-3.5 h-3.5" />
+                                  <Plus className="w-3.5 h-3.5" />
                                 </button>
                               </div>
                             </div>
@@ -5000,59 +6770,25 @@ export default function CustomerStore({
                 exit={{ opacity: 0, y: -15 }}
                 className="space-y-6"
               >
-                {/* Campaign Header banner */}
-                {(() => {
-                  const theme = getThemeColorClasses(selectedOffer.themeColor);
-                  const IconComponent = theme.icon;
-                  return (
-                    <div className={`relative overflow-hidden rounded-[20px] p-4 sm:p-5 border shadow-2xs flex flex-row justify-between items-center gap-4 ${theme.bg}`}>
-                      {/* Ambient background vector icons */}
-                      <div className="absolute right-[-10px] bottom-[-20px] opacity-10">
-                        <IconComponent className={`w-24 h-24 ${theme.iconColor}`} />
-                      </div>
-                      
-                      <div className="space-y-1 relative z-10 flex-1">
-                        <button 
-                          onClick={() => setSelectedOffer(null)}
-                          className="inline-flex items-center gap-1 text-[10px] font-black text-pink-500 hover:text-pink-600 uppercase tracking-wider mb-1.5 hover:underline cursor-pointer"
-                        >
-                          ← Continue Shopping
-                        </button>
-                        
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className={`text-[9px] font-black text-white px-1.5 py-0.5 rounded uppercase tracking-wider ${theme.badge}`}>
-                            {selectedOffer.badge}
-                          </span>
-                          <span className="text-[10px] text-slate-500 font-bold tracking-tight">Campaign Spotlight</span>
-                        </div>
-                        
-                        <h2 className={`text-base sm:text-lg font-black uppercase tracking-tight leading-none ${theme.text} mt-1`}>
-                          {selectedOffer.title}
-                        </h2>
-                        
-                        <p className={`text-[10.5px] font-semibold max-w-xl ${theme.subtext} leading-tight line-clamp-1`}>
-                          {selectedOffer.desc}
-                        </p>
-                      </div>
-
-                      <div className="shrink-0 relative z-10 hidden sm:block">
-                        <div className="bg-white/90 backdrop-blur-xs border border-slate-200/40 px-3 py-1.5 rounded-xl shadow-2xs text-center">
-                          <span className="block text-[8px] font-black text-slate-450 uppercase tracking-widest">Category</span>
-                          <span className="block text-[10.5px] font-black text-slate-800 uppercase tracking-tight mt-0.5 truncate max-w-[125px]">
-                            {categories.find(c => c.id === selectedOffer.catId)?.name || 'Campaign'}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })()}
+                {/* Back to Home Store bar matching ordinary categories */}
+                <div className="flex items-center justify-between pb-1 border-b border-slate-100/80 mb-2">
+                  <button 
+                    onClick={() => setSelectedOffer(null)}
+                    className="inline-flex items-center gap-1 text-[9.5px] sm:text-xs font-black text-slate-500 hover:text-pink-600 bg-slate-50 hover:bg-slate-100 border border-slate-200/80 px-2.5 py-1 rounded-lg cursor-pointer transition-all active:scale-95"
+                  >
+                    ← {lang === 'bn' ? 'স্টোরে ফিরে যান' : 'Back to Store'}
+                  </button>
+                  <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-wide">
+                    {categories.find(c => c.id === selectedOffer.catId)?.name || 'Campaign'}
+                  </span>
+                </div>
 
                 {/* Campaign Products Feed list */}
                 <div>
-                  <h3 className="font-extrabold text-slate-900 text-lg mb-4 tracking-tight border-b pb-2 flex items-center justify-between">
-                    <span>Exclusive Campaign Collection</span>
-                    <span className="text-xs text-slate-400 font-medium">
-                      {products.filter(p => p.catId === selectedOffer.catId && p.inStock).length} items found
+                  <h3 className="font-black text-slate-800 text-xs sm:text-sm mb-2.5 tracking-tight border-b pb-1 flex items-center justify-between uppercase">
+                    <span>{selectedOffer.title}</span>
+                    <span className="text-[9.5px] text-slate-400 font-bold font-mono normal-case">
+                      Showing {products.filter(p => p.catId === selectedOffer.catId && p.inStock).length} items
                     </span>
                   </h3>
 
@@ -5060,16 +6796,10 @@ export default function CustomerStore({
                     const campaignProducts = products.filter(p => p.catId === selectedOffer.catId && p.inStock);
                     if (campaignProducts.length === 0) {
                       return (
-                        <div className="text-center py-16 bg-white border border-slate-100 rounded-3xl shadow-xs">
-                          <ShoppingBag className="w-10 h-10 text-slate-300 mx-auto mb-3 animate-pulse" />
-                          <h4 className="font-bold text-slate-500">Products are coming soon!</h4>
-                          <p className="text-xs text-slate-400 mt-1">Our resellers are setting up active stock packages for this special campaign.</p>
-                          <button 
-                            onClick={() => setSelectedOffer(null)}
-                            className="mt-4 inline-flex items-center gap-1.5 bg-pink-500 hover:bg-pink-600 text-white font-bold text-xs px-4 py-2 rounded-xl transition-colors shadow-xs"
-                          >
-                            Explore Trending Deals
-                          </button>
+                        <div className="text-center py-10 bg-white border border-slate-150 rounded-2xl shadow-3xs p-4 my-2 max-w-sm mx-auto">
+                          <ShoppingBag className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                          <h4 className="font-extrabold text-slate-700 text-[11px] sm:text-xs">{lang === 'bn' ? 'পণ্য শীঘ্রই আসছে!' : 'Products are coming soon!'}</h4>
+                          <p className="text-[9.5px] text-slate-450 mt-0.5 max-w-xs mx-auto leading-normal">{lang === 'bn' ? 'আমাদের রিসেলাররা এই ক্যাম্পেইনের জন্য পণ্য সাজাচ্ছেন।' : 'Our resellers are setting up stock packages for this special campaign.'}</p>
                         </div>
                       );
                     }
@@ -5121,7 +6851,7 @@ export default function CustomerStore({
 
                                 {/* Content items */}
                                 <div className="p-2 flex flex-col flex-1 mt-2 text-left">
-                                  <h4 className="font-extrabold text-slate-850 text-slate-800 text-xs md:text-xs leading-tight line-clamp-2 min-h-[32px] group-hover:text-pink-500 transition-colors">
+                                  <h4 className="font-extrabold text-slate-800 text-xs leading-tight line-clamp-2 min-h-[32px] group-hover:text-pink-500 transition-colors">
                                     {prod.name}
                                   </h4>
                                   
@@ -5173,35 +6903,74 @@ export default function CustomerStore({
                 <div className="grid grid-cols-1 lg:grid-cols-4 gap-8 items-start">
                   {renderSidebarContent()}
                   <div className="lg:col-span-3 space-y-8 animate-fade-in">
-                {/* Banner Carousel Hero */}
-                {!selectedCat && activeBanners.length > 0 && (
-                  <div className={`relative overflow-hidden rounded-2xl shadow-lg border border-slate-100 aspect-[12/5] sm:aspect-auto ${bannerHeight === 'small' ? 'sm:h-[180px] md:h-[260px] lg:h-[295px]' : bannerHeight === 'large' ? 'sm:h-[260px] md:h-[390px] lg:h-[435px]' : 'sm:h-[220px] md:h-[320px] lg:h-[365px]'}`}>
-                    <div 
-                      className="h-full flex w-full transition-transform duration-500 ease-in-out"
-                      style={{ 
-                        transform: `translateX(-${(currentBanner % activeBanners.length) * 100}%)`
-                      }}
-                    >
-                      {activeBanners.map(ban => (
-                        <div key={ban.id} className="h-full w-full flex-shrink-0 relative overflow-hidden">
-                          {ban.link ? (
-                            <a 
-                              href={ban.link} 
-                              target="_blank" 
-                              rel="noopener noreferrer" 
-                              className="block h-full w-full cursor-pointer hover:opacity-95 transition-opacity"
-                              title="View promotion"
-                            >
-                              <img src={ban.img} alt="Promo" className="w-full h-full object-cover" />
-                            </a>
-                          ) : (
-                            <img src={ban.img} alt="Promo" className="w-full h-full object-cover" />
-                          )}
+                    {/* Banner Carousel Hero */}
+                    {!selectedCat && activeBanners.length > 0 && (
+                      <div 
+                        onTouchStart={handleBannerTouchStart}
+                        onTouchMove={handleBannerTouchMove}
+                        onTouchEnd={handleBannerTouchEnd}
+                        onMouseDown={handleBannerMouseDown}
+                        onMouseUp={handleBannerMouseUp}
+                        onMouseLeave={handleBannerMouseLeave}
+                        className={`relative overflow-hidden rounded-2xl shadow-lg border border-slate-100 select-none cursor-grab active:cursor-grabbing aspect-[12/5] sm:aspect-auto ${bannerHeight === 'small' ? 'sm:h-[180px] md:h-[260px] lg:h-[295px]' : bannerHeight === 'large' ? 'sm:h-[260px] md:h-[390px] lg:h-[435px]' : 'sm:h-[220px] md:h-[320px] lg:h-[365px]'}`}
+                      >
+                        <div 
+                          className="h-full flex w-full transition-transform duration-500 ease-in-out pointer-events-none"
+                          style={{ 
+                            transform: `translateX(-${(currentBanner % activeBanners.length) * 100}%)`
+                          }}
+                        >
+                          {activeBanners.map(ban => (
+                            <div key={ban.id} className="h-full w-full flex-shrink-0 relative overflow-hidden pointer-events-auto">
+                              {ban.link ? (
+                                <a 
+                                  href={ban.link} 
+                                  target="_blank" 
+                                  rel="noopener noreferrer" 
+                                  className="block h-full w-full cursor-pointer hover:opacity-95 transition-opacity"
+                                  title="View promotion"
+                                >
+                                  <img 
+                                    src={ban.img} 
+                                    alt="Promo" 
+                                    className="w-full h-full object-cover select-none pointer-events-none" 
+                                    onDragStart={(e) => e.preventDefault()}
+                                  />
+                                </a>
+                              ) : (
+                                <img 
+                                  src={ban.img} 
+                                  alt="Promo" 
+                                  className="w-full h-full object-cover select-none pointer-events-none" 
+                                  onDragStart={(e) => e.preventDefault()}
+                                />
+                              )}
+                            </div>
+                          ))}
                         </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+
+                        {/* Pagination Indicator Dots */}
+                        {activeBanners.length > 1 && (
+                          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5 z-10 bg-black/30 px-2 py-1 rounded-full backdrop-blur-3xs">
+                            {activeBanners.map((_, idx) => (
+                              <button
+                                key={idx}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setCurrentBanner(idx);
+                                }}
+                                className={`w-1.5 h-1.5 rounded-full transition-all duration-300 cursor-pointer ${
+                                  (currentBanner % activeBanners.length) === idx 
+                                    ? 'bg-pink-500 w-3' 
+                                    : 'bg-white/60 hover:bg-white/90'
+                                }`}
+                                aria-label={`Go to banner slide ${idx + 1}`}
+                              />
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                 {/* Special Offers Section - Displayed on both Desktop and Mobile */}
                 {!selectedCat && specialOffers && specialOffers.length > 0 && (
@@ -5222,7 +6991,6 @@ export default function CustomerStore({
                               setSelectedOffer(offer);
                               setSelectedCat(null);
                               setViewingProduct(null);
-                              showNotif(`Opened ${offer.title} campaign!`, 'success');
                             }}
                             className={`flex-shrink-0 text-left w-[145px] border-2 rounded-2xl p-3 flex flex-col justify-between h-[160px] shadow-xs relative overflow-hidden transition-all hover:scale-[1.03] active:scale-95 cursor-pointer ${theme.bg} border-slate-200/60 hover:border-pink-300`}
                             id={`offer-btn-${offer.id}`}
@@ -5308,8 +7076,8 @@ export default function CustomerStore({
                             }}
                             className={`flex-shrink-0 flex flex-col items-center gap-1.5 p-2 rounded-2xl min-w-[95px] transition-all bg-white border cursor-pointer ${isSel ? 'border-pink-500 bg-pink-50/40 ring-1 ring-pink-500/20 shadow-sm' : 'border-slate-200 hover:bg-slate-50'}`}
                           >
-                            <div className="w-12 h-12 rounded-xl overflow-hidden bg-slate-50 flex items-center justify-center p-1 border border-slate-100">
-                              <img src={getCategoryIcon(c.id)} alt={c.name} className="w-full h-full object-contain mix-blend-multiply" />
+                            <div className="w-12 h-12 rounded-xl overflow-hidden bg-slate-50 flex items-center justify-center p-0.5 border border-slate-100">
+                              <img src={c.image || getCategoryIcon(c.id)} alt={c.name} className={`w-full h-full ${c.image ? 'object-cover rounded-lg' : 'object-contain mix-blend-multiply'}`} />
                             </div>
                             <span className="text-[10px] font-black tracking-tight text-slate-800 uppercase text-center leading-tight truncate w-[85px]">{c.name}</span>
                           </button>
@@ -5480,8 +7248,8 @@ export default function CustomerStore({
             </div>
 
             {/* Primary Card Marketplace */}
-            <div id="products-header" className="mt-8">
-                  <h3 className="font-extrabold text-slate-900 text-lg mb-4 tracking-tight border-b pb-2 flex items-center justify-between">
+            <div id="products-header" className="mt-6 md:mt-8">
+                  <h3 className="font-black text-slate-900 text-xs sm:text-sm md:text-base mb-3 tracking-tight border-b pb-2 flex items-center justify-between uppercase">
                     <span>
                       {selectedCat 
                         ? categories.find(c => c.id === selectedCat)?.name 
@@ -5489,7 +7257,7 @@ export default function CustomerStore({
                           ? `Search result for "${searchInput}"` 
                           : 'Trending Collections'}
                     </span>
-                    <span className="text-xs text-slate-400 font-medium font-mono">Showing {displayProducts.length} items</span>
+                    <span className="text-[10px] text-slate-400 font-bold font-mono">Showing {displayProducts.length} items</span>
                   </h3>
 
                   {displayProducts.length === 0 ? (
@@ -5499,7 +7267,7 @@ export default function CustomerStore({
                       <p className="text-xs text-slate-400 mt-1">Refine your active filters or clear search term</p>
                     </div>
                   ) : (
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 sm:gap-6">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-4 sm:gap-6">
                       {displayProducts.map(prod => {
                         const sPct = prod.originalPrice > 0 ? Math.round(((prod.originalPrice - prod.discountPrice) / prod.originalPrice) * 100) : 0;
                         return (
@@ -5583,7 +7351,6 @@ export default function CustomerStore({
                     </div>
                   )}
                 </div>
-
               </motion.div>
         )}
       </AnimatePresence>
@@ -5598,31 +7365,26 @@ export default function CustomerStore({
           
           {/* Section 1: Dynamic Brand Card */}
           <div className="flex flex-col space-y-4">
-            <div className="flex items-center gap-4">
-              {footerConfig.brandLogoUrl ? (
-                <img 
-                  src={footerConfig.brandLogoUrl} 
-                  alt="Brand Logo" 
-                  className="w-16 h-16 sm:w-20 sm:h-20 object-cover rounded-2xl border border-slate-700/60 shadow-lg shrink-0" 
-                  referrerPolicy="no-referrer"
-                />
-              ) : (
+            {footerConfig.brandLogoUrl ? (
+              <img 
+                src={footerConfig.brandLogoUrl} 
+                alt="Brand Logo" 
+                className="h-12 sm:h-16 w-auto object-contain cursor-pointer hover:opacity-90 self-start" 
+                referrerPolicy="no-referrer"
+                onClick={goHome}
+              />
+            ) : (
+              <div className="flex items-center gap-4">
                 <div className="w-16 h-16 sm:w-20 sm:h-20 bg-gradient-to-r from-pink-500 to-indigo-600 rounded-2xl flex items-center justify-center text-white font-extrabold text-xl shadow-lg shrink-0">
-                  BW
+                  DEALY
                 </div>
-              )}
-              <div className="flex flex-col justify-center">
-                <h3 className="!text-white font-black text-2xl sm:text-3xl leading-tight font-sans tracking-tight uppercase">
-                  {footerConfig.websiteUrl?.includes('badhonsworld') || footerConfig.aboutUs?.includes("Badhon's World") ? (
-                    <>
-                      Badhon's<br />World
-                    </>
-                  ) : (
-                    "Dealy Store"
-                  )}
-                </h3>
+                <div className="flex flex-col justify-center">
+                  <h3 className="!text-white font-black text-2xl sm:text-3xl leading-tight font-sans tracking-tight uppercase">
+                    Dealy Store
+                  </h3>
+                </div>
               </div>
-            </div>
+            )}
             
             <p className="text-[14px] leading-relaxed text-slate-300 font-medium font-sans">
               {footerConfig.aboutUs}
@@ -5685,7 +7447,11 @@ export default function CustomerStore({
             <ul className="space-y-3 text-[14px] text-slate-300 font-medium font-sans">
               <li 
                 onClick={() => {
+                  setViewingCustomDocs(null);
+                  setViewingProduct(null);
+                  setSelectedStoreSellerName(null);
                   setShowShopPage(true);
+                  setShowAllFlashOffers(false);
                   setShowCartPage(false);
                   setShowSupportPage(false);
                   setShowCustProfilePage(false);
@@ -5700,6 +7466,9 @@ export default function CustomerStore({
               </li>
               <li 
                 onClick={() => {
+                  setViewingCustomDocs(null);
+                  setViewingProduct(null);
+                  setSelectedStoreSellerName(null);
                   setShowAllFlashOffers(true);
                   setShowShopPage(false);
                   setShowCartPage(false);
@@ -5716,21 +7485,12 @@ export default function CustomerStore({
               </li>
               <li 
                 onClick={() => {
+                  setViewingCustomDocs(null);
+                  setViewingProduct(null);
+                  setSelectedStoreSellerName(null);
                   goHome();
-                  const showcaseSection = document.getElementById('products-header') || document.getElementById('categories-section');
-                  if (showcaseSection) {
-                    showcaseSection.scrollIntoView({ behavior: 'smooth' });
-                  } else {
-                    window.scrollTo({ top: 300, behavior: 'smooth' });
-                  }
+                  window.scrollTo({ top: 300, behavior: 'smooth' });
                 }}
-                className="hover:text-pink-500 cursor-pointer transition-all duration-200 flex items-center gap-1.5 group select-none"
-              >
-                <span className="text-pink-500 transition-transform group-hover:translate-x-1 font-bold">&gt;</span>
-                <span>Top Sales</span>
-              </li>
-              <li 
-                onClick={goHome}
                 className="hover:text-pink-500 cursor-pointer transition-all duration-200 flex items-center gap-1.5 group select-none"
               >
                 <span className="text-pink-500 transition-transform group-hover:translate-x-1 font-bold">&gt;</span>
@@ -5738,6 +7498,8 @@ export default function CustomerStore({
               </li>
               <li 
                 onClick={() => {
+                  setViewingCustomDocs(null);
+                  setViewingProduct(null);
                   openResellerLandingPage();
                   window.scrollTo({ top: 0, behavior: 'smooth' });
                 }}
@@ -5745,14 +7507,6 @@ export default function CustomerStore({
               >
                 <span className="text-pink-500 transition-transform group-hover:translate-x-1 font-bold">&gt;</span>
                 <span>Become a Seller</span>
-              </li>
-              <li 
-                onClick={openPanelLogin}
-                className="text-pink-400 hover:text-pink-300 font-bold cursor-pointer transition-all duration-200 flex items-center gap-1.5 group select-none"
-              >
-                <span className="text-pink-400 transition-transform group-hover:translate-x-1 font-bold">&gt;</span>
-                <ShieldCheck className="w-4 h-4 text-pink-400 shrink-0" />
-                <span>Admin Portal</span>
               </li>
             </ul>
           </div>
@@ -5765,6 +7519,8 @@ export default function CustomerStore({
             <ul className="space-y-3 text-[14px] text-slate-300 font-medium font-sans">
               <li 
                 onClick={() => {
+                  setViewingCustomDocs(null);
+                  setViewingProduct(null);
                   setShowSupportPage(true);
                   setShowShopPage(false);
                   setShowCartPage(false);
@@ -5780,6 +7536,8 @@ export default function CustomerStore({
               </li>
               <li 
                 onClick={() => {
+                  setViewingCustomDocs(null);
+                  setViewingProduct(null);
                   setShowSupportPage(true);
                   setShowShopPage(false);
                   setShowCartPage(false);
@@ -5794,14 +7552,28 @@ export default function CustomerStore({
                 <span>Contact us</span>
               </li>
               <li 
-                onClick={() => showNotif("Privacy Policy: " + footerConfig.privacyPolicy, "success")}
+                onClick={() => {
+                  setViewingCustomDocs({
+                    title: lang === 'en' ? 'Privacy Policy' : 'প্রাইভেসি পলিসি',
+                    content: footerConfig.privacyPolicyFullText || `<h3>Privacy Policy</h3><p>${footerConfig.privacyPolicy}</p>`
+                  });
+                  setViewingProduct(null);
+                  window.scrollTo({ top: 300, behavior: 'smooth' });
+                }}
                 className="hover:text-pink-500 cursor-pointer transition-all duration-200 flex items-center gap-1.5 group select-none"
               >
                 <span className="text-pink-500 transition-transform group-hover:translate-x-1 font-bold">&gt;</span>
                 <span>Privacy Policy</span>
               </li>
               <li 
-                onClick={() => showNotif("Terms & Conditions: Please view Reseller agreements for complete specifications.", "success")}
+                onClick={() => {
+                  setViewingCustomDocs({
+                    title: lang === 'en' ? 'Terms & Conditions' : 'শর্তাবলী এবং নিয়মাবলী',
+                    content: footerConfig.termsConditionsFullText || `<h3>Terms & Conditions</h3><p>Please view Reseller agreements for complete specifications.</p>`
+                  });
+                  setViewingProduct(null);
+                  window.scrollTo({ top: 300, behavior: 'smooth' });
+                }}
                 className="hover:text-pink-500 cursor-pointer transition-all duration-200 flex items-center gap-1.5 group select-none"
               >
                 <span className="text-pink-500 transition-transform group-hover:translate-x-1 font-bold">&gt;</span>
@@ -5873,17 +7645,15 @@ export default function CustomerStore({
           </div>
           
           <div className="flex flex-wrap gap-x-3 gap-y-1.5 items-center justify-center md:justify-end text-slate-400 hover:text-slate-300 text-[13px] font-bold font-sans">
-            <span onClick={openPanelLogin} className="text-pink-400 hover:text-pink-300 font-black cursor-pointer transition-colors flex items-center gap-1.5 mr-1 bg-white/5 px-2 py-1 rounded-md border border-pink-500/20">
-              <ShieldCheck className="w-4 h-4 text-pink-400" /> Admin Login
-            </span>
-            <span className="text-slate-700 font-normal">|</span>
-            <span onClick={() => { setShowSupportPage(true); window.scrollTo({ top: 300, behavior: 'smooth' }); }} className="hover:text-pink-500 cursor-pointer transition-colors">Customer's review</span>
+            <span onClick={openPanelLogin} className="hover:text-pink-500 cursor-pointer transition-colors">{lang === 'en' ? "Become Seller" : "সেলার হোন"}</span>
             <span className="text-slate-700 font-normal">|</span>
             <span onClick={openResellerLandingPage} className="hover:text-pink-500 cursor-pointer transition-colors">How to be a seller</span>
             <span className="text-slate-700 font-normal">|</span>
             <span onClick={openResellerLandingPage} className="hover:text-pink-500 cursor-pointer transition-colors">Seller benefits</span>
             <span className="text-slate-700 font-normal">|</span>
             <span onClick={() => { setShowSupportPage(true); window.scrollTo({ top: 300, behavior: 'smooth' }); }} className="hover:text-pink-500 cursor-pointer transition-colors">FAQ's</span>
+            <span className="text-slate-700 font-normal">|</span>
+            <span onClick={openPanelLogin} className="hover:text-pink-500 cursor-pointer transition-colors text-[11px] uppercase tracking-wide">Partner Console</span>
             <span className="text-slate-700 font-normal">|</span>
             <span onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} className="hover:text-pink-500 cursor-pointer transition-colors select-none text-[11px] flex items-center gap-0.5 uppercase tracking-wide">Go to top &uarr;</span>
           </div>
@@ -5993,7 +7763,7 @@ export default function CustomerStore({
           }}
           className={`flex flex-col items-center justify-center w-14 py-1 rounded-xl transition-all cursor-pointer ${(showCustProfilePage || showMyOrdersPage) ? 'bg-white/20 font-extrabold text-white scale-[1.05] shadow-xs' : 'opacity-85 hover:opacity-100'}`}
         >
-          <User className="w-4.5 h-4.5" />
+          <UserIcon className="w-4.5 h-4.5" />
           <span className="text-[9.5px] font-black mt-1 uppercase tracking-tight">{loggedCustomer ? t("Me") : t("Log In")}</span>
         </button>
       </nav>
@@ -6044,7 +7814,7 @@ export default function CustomerStore({
                 {/* 1. Quick Info */}
                 <div className="bg-slate-50 border rounded-2xl p-3 flex items-center gap-3">
                   <div className="p-2 bg-pink-100 rounded-lg text-pink-605 text-pink-500">
-                    <User className="w-5 h-5" />
+                    <UserIcon className="w-5 h-5" />
                   </div>
                   <div className="min-w-0 flex-grow">
                     {loggedCustomer ? (
@@ -6078,12 +7848,23 @@ export default function CustomerStore({
                   <button
                     onClick={() => {
                       setShowMobileMenu(false);
-                      openResellerLandingPage();
+                      openPanelLogin();
                     }}
                     className="w-full text-left px-3 py-2.5 rounded-xl hover:bg-pink-100/40 text-pink-600 font-black text-xs flex items-center gap-2.5 transition-colors cursor-pointer border border-pink-100/50 bg-pink-50/50"
                   >
-                    <UserCheck className="w-4 h-4 text-pink-600 animate-bounce" />
-                    <span className="uppercase">{t("Join Reseller")}</span>
+                    <UserCheck className="w-4 h-4 text-pink-600" />
+                    <span className="uppercase">{lang === 'en' ? "Become Seller" : "সেলার হোন"}</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setShowMobileMenu(false);
+                      openAffiliatePage();
+                    }}
+                    className="w-full text-left px-3 py-2.5 rounded-xl hover:bg-pink-100/40 text-pink-600 font-black text-xs flex items-center gap-2.5 transition-colors cursor-pointer border border-pink-100/50 bg-pink-50/50 mt-1"
+                  >
+                    <Award className="w-4 h-4 text-pink-600" />
+                    <span className="uppercase">{lang === 'en' ? "Affiliate Program" : "অ্যাফিলিয়েট প্রোগ্রাম"}</span>
                   </button>
 
                   <button
@@ -6105,60 +7886,13 @@ export default function CustomerStore({
                     }}
                     className="w-full text-left px-3 py-2.5 rounded-xl hover:bg-slate-50 text-slate-700 font-bold text-xs flex items-center gap-2.5 transition-colors cursor-pointer"
                   >
-                    <User className="w-4 h-4 text-pink-500" />
+                    <UserIcon className="w-4 h-4 text-pink-500" />
                     <span>{loggedCustomer ? t("My Account") : t("My Account")}</span>
                   </button>
                 </div>
 
-                {/* 3. Browse categories */}
-                <div className="space-y-1">
-                  <p className="text-[9px] font-black tracking-wider text-slate-400 uppercase mb-2 px-1">Browse Categories</p>
-                  <div className="grid grid-cols-1 gap-1 max-h-[160px] overflow-y-auto pr-1">
-                    <button
-                      onClick={() => {
-                        setSelectedCat(null);
-                        setShowMobileMenu(false);
-                        setViewingProduct(null);
-                        setShowOnlyFavorites(false);
-                        setShowCartPage(false);
-                        setShowSupportPage(false);
-                        setShowShopPage(true);
-                        setShowResellerLandingPage(false);
-                        window.scrollTo({ top: 0, behavior: 'smooth' });
-                      }}
-                      className={`w-full text-left px-3 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-between cursor-pointer ${!selectedCat ? 'bg-pink-50/60 text-pink-600' : 'hover:bg-slate-50 text-slate-700'}`}
-                    >
-                      <span>All Products</span>
-                      <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.2 rounded-full font-mono">{products.length}</span>
-                    </button>
-                    {categories.map((cat) => {
-                      const count = products.filter(p => p.catId === cat.id).length;
-                      return (
-                        <button
-                          key={cat.id}
-                          onClick={() => {
-                            setSelectedCat(cat.id);
-                            setShowMobileMenu(false);
-                            setViewingProduct(null);
-                            setShowOnlyFavorites(false);
-                            setShowCartPage(false);
-                            setShowSupportPage(false);
-                            setShowShopPage(false);
-                            setShowResellerLandingPage(false);
-                            window.scrollTo({ top: 0, behavior: 'smooth' });
-                          }}
-                          className={`w-full text-left px-3 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-between cursor-pointer ${selectedCat === cat.id ? 'bg-pink-50/60 text-pink-600' : 'hover:bg-slate-50 text-slate-700'}`}
-                        >
-                          <span>{cat.name}</span>
-                          <span className="text-[10px] bg-slate-100 text-slate-650 px-1.5 py-0.2 rounded-full font-mono">{count}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* 4. More operations */}
-                <div className="space-y-1 pt-2 border-t">
+                {/* 3. More operations */}
+                <div className="space-y-1 pt-2">
                   <p className="text-[9px] font-black tracking-wider text-slate-400 uppercase mb-2 px-1">More Operations</p>
                   <div className="flex items-center justify-between p-2.5 bg-slate-50 rounded-xl">
                     <span className="text-xs font-bold text-slate-600">Language / ভাষা</span>
@@ -6372,14 +8106,23 @@ export default function CustomerStore({
                   </div>
                   <div className="form-group">
                     <label className="form-label">Password Key</label>
-                    <input 
-                      type="password" 
-                      className="form-input" 
-                      placeholder="🔒 ••••••••" 
-                      required
-                      value={loginData.pass}
-                      onChange={(e) => setLoginData({ ...loginData, pass: e.target.value })}
-                    />
+                    <div className="relative">
+                      <input 
+                        type={showCustLoginPass ? "text" : "password"} 
+                        className="form-input pr-10" 
+                        placeholder="🔒 ••••••••" 
+                        required
+                        value={loginData.pass}
+                        onChange={(e) => setLoginData({ ...loginData, pass: e.target.value })}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowCustLoginPass(!showCustLoginPass)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-450 hover:text-slate-600 flex items-center bg-transparent border-none cursor-pointer"
+                      >
+                        {showCustLoginPass ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
                   </div>
                   <button type="submit" className="w-full bg-pink-500 text-white font-bold py-3 rounded-xl hover:bg-pink-600 transition-colors text-xs uppercase tracking-wider">
                     Authorize Entry
@@ -6421,16 +8164,25 @@ export default function CustomerStore({
                       onChange={(e) => setRegData({ ...regData, address: e.target.value })}
                     />
                   </div>
-                  <div className="form-group">
+                  <div className="form-group font-sans">
                     <label className="form-label">Secured Password</label>
-                    <input 
-                      type="password" 
-                      className="form-input" 
-                      placeholder="🔒 ••••••••" 
-                      required
-                      value={regData.pass}
-                      onChange={(e) => setRegData({ ...regData, pass: e.target.value })}
-                    />
+                    <div className="relative font-sans">
+                      <input 
+                        type={showCustRegPass ? "text" : "password"} 
+                        className="form-input pr-10" 
+                        placeholder="🔒 ••••••••" 
+                        required
+                        value={regData.pass}
+                        onChange={(e) => setRegData({ ...regData, pass: e.target.value })}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowCustRegPass(!showCustRegPass)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-450 hover:text-slate-600 flex items-center bg-transparent border-none cursor-pointer"
+                      >
+                        {showCustRegPass ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
                   </div>
                   <button type="submit" className="w-full bg-pink-500 text-white font-bold py-3 rounded-xl hover:bg-pink-600 transition-colors text-xs uppercase tracking-wider">
                     Create Profile
@@ -6459,30 +8211,400 @@ export default function CustomerStore({
               exit={{ opacity: 0, scale: 0.96 }}
               className="bg-white rounded-3xl shadow-2xl w-full max-w-lg p-6 relative z-10 text-slate-800 max-h-[85vh] overflow-y-auto"
             >
-              <div className="flex justify-between items-center mb-4 pb-3 border-b">
-                <h3 className="font-extrabold text-base flex items-center gap-2 text-slate-900">
-                  <ShoppingCart className="w-4 h-4 text-pink-500" /> My Checkout Cart
-                </h3>
-                <button onClick={() => setShowCartModal(false)} className="text-slate-400 hover:text-slate-600">
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
+              {(isDirectBuyActive && directBuyItem ? [directBuyItem] : cart).length === 0 ? (
+                <>
+                  <div className="flex justify-between items-center mb-4 pb-3 border-b">
+                    <h3 className="font-extrabold text-base flex items-center gap-2 text-slate-900">
+                      <ShoppingCart className="w-4 h-4 text-pink-500" /> My Checkout Cart
+                    </h3>
+                    <button onClick={() => setShowCartModal(false)} className="text-slate-400 hover:text-slate-600">
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+                  <div className="text-center py-10">
+                    <p className="text-slate-400 font-bold mb-4">Your cart is empty.</p>
+                    <button 
+                      onClick={() => setShowCartModal(false)} 
+                      className="bg-indigo-600 text-white text-xs font-bold px-5 py-2.5 rounded-xl hover:bg-indigo-700"
+                    >
+                      Continue Shopping
+                    </button>
+                  </div>
+                </>
+              ) : clickedPayToConfirm ? (
+                <div className="space-y-4 animate-fade-in font-sans">
+                  {/* Header Title & Close Button X */}
+                  <div className="flex items-center justify-between border-b pb-3 mb-2">
+                    <button 
+                      type="button"
+                      onClick={() => {
+                        setClickedPayToConfirm(false);
+                        if (showCartPage) {
+                          setShowCartModal(false);
+                        }
+                      }}
+                      className="bg-slate-50 hover:bg-slate-100 border text-slate-600 font-extrabold text-[10px] px-2.5 py-1.5 rounded-lg flex items-center gap-1 cursor-pointer transition-all"
+                    >
+                      ← Back
+                    </button>
+                    <h3 className="font-extrabold text-sm sm:text-base text-slate-800 text-center flex-1 select-none font-display">
+                      Select Payment Method
+                    </h3>
+                    <button 
+                      onClick={() => {
+                        setShowCartModal(false);
+                        setClickedPayToConfirm(false);
+                      }} 
+                      className="text-slate-400 hover:text-slate-600 transition-colors p-1"
+                    >
+                      <X className="w-5 h-5 shrink-0" />
+                    </button>
+                  </div>
 
-              {cart.length === 0 ? (
-                <div className="text-center py-10">
-                  <p className="text-slate-400 font-bold mb-4">Your cart is empty.</p>
-                  <button 
-                    onClick={() => setShowCartModal(false)} 
-                    className="bg-indigo-600 text-white text-xs font-bold px-5 py-2.5 rounded-xl hover:bg-indigo-700"
-                  >
-                    Continue Shopping
-                  </button>
+                  {/* Light-blue Banner Alert Notification */}
+                  <div className="bg-blue-50/70 border border-blue-200/30 text-[#0066cc] p-3 rounded-xl flex items-start gap-2.5 text-[10.5px] font-bold leading-normal animate-fade-in">
+                    <Info className="w-4 h-4 text-[#0066cc] shrink-0 mt-0.5" />
+                    <span>Collect payment voucher & get extra savings on your purchase!</span>
+                  </div>
+
+                  {/* Recommended Method Container */}
+                  <div className="space-y-2 mt-4 select-none">
+                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider select-none">
+                      Recommended method(s)
+                    </p>
+                    <button 
+                      type="button"
+                      onClick={() => {
+                        setCheckoutPaymentMethod('Card');
+                        showNotif("CreditCard selected.", "success");
+                      }}
+                      className={`w-full bg-white border rounded-xl p-3 flex items-center justify-between gap-3 text-left transition-all hover:bg-slate-50 cursor-pointer ${
+                        checkoutPaymentMethod === 'Card' ? 'border-pink-500 bg-pink-100/10 ring-1 ring-pink-500' : 'border-slate-150'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="p-2.5 bg-blue-50 text-blue-600 rounded-lg shrink-0">
+                          <CreditCard className="w-4.5 h-4.5" />
+                        </div>
+                        <div>
+                          <span className="block text-[11.5px] font-black text-slate-800">Credit/Debit Card</span>
+                          <span className="block text-[9.5px] text-slate-400 font-bold font-mono">Credit/Debit Card</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="text-[8px] uppercase font-bold text-slate-400 bg-slate-50 px-1 rounded border leading-none py-0.5">Visa / MC</span>
+                        <ChevronRight className="w-4 h-4 text-slate-400" />
+                      </div>
+                    </button>
+                  </div>
+
+                  {/* Other Payment Methods List Container */}
+                  <div className="space-y-2.5 mt-4">
+                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider select-none">
+                      Other Payment Methods
+                    </p>
+
+                    <div className="divide-y divide-slate-150 border border-slate-150 rounded-xl overflow-hidden shadow-3xs bg-white">
+                      {/* bKash Selection Item */}
+                      <button 
+                        type="button"
+                        onClick={() => {
+                          setCheckoutPaymentMethod('bKash');
+                          setCheckoutTxId('');
+                        }}
+                        className={`w-full bg-white p-3.5 flex items-center justify-between gap-3 text-left transition-all hover:bg-slate-100/30 cursor-pointer ${
+                          checkoutPaymentMethod === 'bKash' ? 'bg-pink-100/10' : ''
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-full bg-pink-500 text-white flex items-center justify-center font-black shrink-0 shadow-3xs border border-pink-400 text-xs font-sans">
+                            bK
+                          </div>
+                          <div>
+                            <span className="block text-[11.5px] font-black text-slate-800 font-sans">Save bKash Account</span>
+                            <span className="block text-[9.5px] text-slate-400 font-bold select-none">Bkash instant personal account validation</span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1.5 flex-row">
+                          {checkoutPaymentMethod === 'bKash' && <span className="w-2 h-2 rounded-full bg-pink-500 animate-pulse"></span>}
+                          <ChevronRight className="w-4 h-4 text-slate-400" />
+                        </div>
+                      </button>
+
+                      {/* Nagad Selection Item */}
+                      <button 
+                        type="button"
+                        onClick={() => {
+                          setCheckoutPaymentMethod('Nagad');
+                          setCheckoutTxId('');
+                        }}
+                        className={`w-full bg-white p-3.5 flex items-center justify-between gap-3 text-left transition-all hover:bg-slate-100/30 cursor-pointer ${
+                          checkoutPaymentMethod === 'Nagad' ? 'bg-orange-100/10' : ''
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-full bg-orange-500 text-white flex items-center justify-center font-black shrink-0 shadow-3xs border border-orange-400 text-xs text-orange-100 font-sans">
+                            Ng
+                          </div>
+                          <div>
+                            <span className="block text-[11.5px] font-black text-slate-800 font-sans">Nagad Pay</span>
+                            <span className="block text-[9.5px] text-slate-400 font-bold select-none font-sans">Secure instant Nagad pay-out channels</span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1.5 flex-row">
+                          {checkoutPaymentMethod === 'Nagad' && <span className="w-2 h-2 rounded-full bg-orange-500 animate-pulse"></span>}
+                          <ChevronRight className="w-4 h-4 text-slate-400" />
+                        </div>
+                      </button>
+
+                      {/* Rocket Selection Item */}
+                      <button 
+                        type="button"
+                        onClick={() => {
+                          setCheckoutPaymentMethod('Rocket');
+                          setCheckoutTxId('');
+                        }}
+                        className={`w-full bg-white p-3.5 flex items-center justify-between gap-3 text-left transition-all hover:bg-slate-100/30 cursor-pointer ${
+                          checkoutPaymentMethod === 'Rocket' ? 'bg-purple-100/10' : ''
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-full bg-indigo-600 text-white flex items-center justify-center font-black shrink-0 shadow-3xs border border-indigo-400 text-xs text-indigo-100 font-mono">
+                            Rk
+                          </div>
+                          <div>
+                            <span className="block text-[11.5px] font-black text-slate-800">Rocket Pay</span>
+                            <span className="block text-[9.5px] text-slate-400 font-bold select-none font-sans">DBBL Rocket payment transaction</span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1.5 flex-row">
+                          {checkoutPaymentMethod === 'Rocket' && <span className="w-2 h-2 rounded-full bg-indigo-600 animate-pulse"></span>}
+                          <ChevronRight className="w-4 h-4 text-slate-400" />
+                        </div>
+                      </button>
+
+                      {/* Cash on Delivery (COD) Selection Item */}
+                      <button 
+                        type="button"
+                        disabled={globalIsAdvanceEnabled}
+                        onClick={() => {
+                          if (globalIsAdvanceEnabled) return;
+                          setCheckoutPaymentMethod('COD');
+                          setCheckoutTxId('');
+                        }}
+                        className={`w-full p-3.5 flex items-center justify-between gap-3 text-left transition-all ${
+                          globalIsAdvanceEnabled 
+                            ? 'bg-slate-50 opacity-40 cursor-not-allowed select-none' 
+                            : 'bg-white hover:bg-slate-100/30 cursor-pointer'
+                        } ${
+                          checkoutPaymentMethod === 'COD' && !globalIsAdvanceEnabled ? 'bg-green-100/10' : ''
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="p-2 bg-emerald-50 text-emerald-600 rounded-full shrink-0 shadow-empty w-9 h-9 flex items-center justify-center font-black border border-emerald-100">
+                            <Truck className="w-4.5 h-4.5" />
+                          </div>
+                          <div>
+                            <span className="block text-[11.5px] font-black text-slate-800 font-sans flex items-center gap-1.5">
+                              Cash on Delivery
+                              {globalIsAdvanceEnabled && (
+                                <span className="text-[8px] bg-amber-50 text-amber-700 border border-amber-200 px-1 rounded uppercase font-black tracking-wide">
+                                  {lang === 'en' ? 'Unavailable: Advance Required' : 'নিষ্ক্রিয়: অগ্রিম আবশ্যক'}
+                                </span>
+                              )}
+                            </span>
+                            <span className="block text-[9.5px] text-slate-400 font-bold select-none font-sans">
+                              {globalIsAdvanceEnabled 
+                                ? (lang === 'en' ? 'Disabled because advance payment is required for these items.' : 'অগ্রিম পেমেন্ট বাধ্যতামূলক হওয়ায় ক্যাশ অন ডেলিভারি প্রযোজ্য নয়।')
+                                : (lang === 'en' ? 'Pay at your shipping doorstep handoff!' : 'ডেলিভারি পাওয়ার পর সম্পূর্ণ মূল্য পরিশোধ করুন।')
+                              }
+                            </span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          {checkoutPaymentMethod === 'COD' && !globalIsAdvanceEnabled && <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>}
+                          <ChevronRight className="w-4 h-4 text-slate-400" />
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* SPECIFIC INSTRUCTION & TXID BOXES IF ADVANCE CHANNEL SPECIFIED */}
+                  {(() => {
+                    const matchedDistrict = deliveryCharges.find(dc => dc.id === checkoutDistrictId);
+                    const isFreeDeliveryApplied = isFreeDeliveryActive && selectedCartItems.some(item => item.product.isFlash);
+                    const deliveryCostAmount = isFreeDeliveryApplied ? 0 : (matchedDistrict ? matchedDistrict.charge : 0);
+                    const finalTotalSum = Math.max(0, cartSubtotal - promoDiscountAmount) + deliveryCostAmount - appliedAffiliateDiscount;
+
+                    let totalAdvanceRequired = 0;
+                    if (advanceConfig && advanceConfig.requireAdvance) {
+                      if (advanceConfig.amountType === 'delivery') {
+                        totalAdvanceRequired = deliveryCostAmount;
+                      } else {
+                        totalAdvanceRequired = advanceConfig.fixedAmount || 0;
+                      }
+                    } else {
+                      totalAdvanceRequired = selectedCartItems.reduce((sum, item) => {
+                        if (item.product.requireAdvance) {
+                          return sum + (item.product.advanceAmount || 0) * item.qty;
+                        }
+                        return sum;
+                      }, 0);
+                    }
+
+                    const isAdvanceEnabled = totalAdvanceRequired > 0;
+
+                    if (checkoutPaymentMethod === 'COD') {
+                      if (isAdvanceEnabled) {
+                        return (
+                          <div className="p-3.5 rounded-xl border border-amber-300 bg-amber-50/50 text-[11px] text-amber-850 font-bold mt-2 animate-fade-in space-y-1 font-sans">
+                            <span className="block text-amber-900 font-extrabold flex items-center gap-1.2">
+                              ⚠️ Action Required for Cash on Delivery (COD)
+                            </span>
+                            <span>
+                              শপিং কার্ট আইটেমের জন্য নিরাপত্তা এডভান্স কুরিয়ার ফি ৳<b>{totalAdvanceRequired}</b> আবশ্যক। দয়া করে bKash, Nagad অথবা Rocket পেমেন্ট মাধ্যম নির্বাচন করে অগ্রিম প্রদান সম্পন্ন করুন।
+                            </span>
+                          </div>
+                        );
+                      }
+                      return (
+                        <div className="p-3.5 rounded-xl border border-emerald-200 bg-emerald-50/50 text-[11px] text-emerald-800 font-bold mt-2 animate-fade-in font-sans">
+                          <span>No advance required. Pay full ৳{finalTotalSum} at delivery point handoff!</span>
+                        </div>
+                      );
+                    }
+
+                    if (checkoutPaymentMethod === 'Card') {
+                      return (
+                        <div className="p-3.5 rounded-xl border border-blue-200 bg-blue-50/50 text-[11px] text-blue-800 font-bold mt-2 animate-fade-in space-y-2 font-sans">
+                          <span className="block font-extrabold text-blue-900">Credit/Debit Online Checkout Gateway Mock</span>
+                          <span>Secure online mock gateway has been pre-selected. After confirming the order, wait while details are validated.</span>
+                        </div>
+                      );
+                    }
+
+                    // Selected an advance channel: bKash, Nagad, Rocket
+                    const activeChannels = advanceConfig.channels ? advanceConfig.channels.filter(c => c.isActive) : [];
+                    const matchedChannel = activeChannels.find(c => c.name.toLowerCase().includes(checkoutPaymentMethod.toLowerCase()) || checkoutPaymentMethod.toLowerCase().includes(c.name.toLowerCase()) || checkoutPaymentMethod.toLowerCase().includes(c.methodType.toLowerCase()));
+                    const selectedChannelObj = matchedChannel || (activeChannels.length > 0 ? activeChannels[0] : null);
+
+                    return (
+                      <div className="bg-amber-50/50 p-4 rounded-xl border border-amber-200/60 space-y-3 mt-3 animate-fade-in text-xs font-sans">
+                        <h4 className="font-extrabold text-[11px] text-amber-850 uppercase tracking-wider flex items-center gap-1.5 font-display">
+                          <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
+                          {checkoutPaymentMethod} {lang === 'en' ? 'Gateway Instructions' : 'গেটওয়ে নির্দেশনাবলী'}
+                        </h4>
+
+                        {selectedChannelObj ? (
+                          <div className="space-y-4 font-sans text-xs">
+                            <div className="bg-white p-3 rounded-lg border border-amber-100 font-bold text-xs space-y-1 text-slate-700">
+                              <div className="flex items-center justify-between flex-wrap gap-1">
+                                <span className="text-slate-500 uppercase text-[9px] font-black">{checkoutPaymentMethod} {lang === 'en' ? 'Account Number' : 'একাউন্ট নম্বর'} ({selectedChannelObj.methodType})</span>
+                                <button 
+                                  type="button"
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(selectedChannelObj.accountNumber);
+                                    showNotif("Account Number copied!", "success");
+                                  }}
+                                  className="text-[9.5px] bg-slate-100 hover:bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded leading-none transition-colors border animate-fade-in cursor-pointer font-bold"
+                                >
+                                  Copy Code
+                                </button>
+                              </div>
+                              <div className="text-sm font-black text-slate-800 font-mono tracking-wide select-all">{selectedChannelObj.accountNumber}</div>
+                            </div>
+
+                            <p className="text-[10px] text-amber-700 leading-relaxed font-bold bg-white p-2.5 rounded-lg border border-amber-100">
+                              {advanceConfig.instructionText || `কুরিয়ার অগ্রিম ভেরিফিকেশন পেমেন্ট ৳${totalAdvanceRequired} সেন্ড মানি করুন। নিচে সঠিক ট্রানজেকশন আইডি প্রদান করুন।`}
+                            </p>
+
+                            <div className="space-y-1">
+                              <label className="text-[9.5px] font-black text-slate-500 uppercase tracking-wider block font-sans">Sender's Mobile Number</label>
+                              <input 
+                                type="tel" 
+                                className="w-full text-xs bg-white border border-slate-200 rounded-lg p-2 font-mono font-bold focus:outline-none focus:border-pink-500"
+                                placeholder="e.g. 017XXXXXXXX"
+                                value={checkoutSenderNo}
+                                onChange={(e) => setCheckoutSenderNo(e.target.value)}
+                              />
+                            </div>
+
+                            <div className="space-y-1">
+                              <label className="text-[9.5px] font-black text-slate-500 uppercase tracking-wider block font-sans">Transaction ID (TxID)</label>
+                              <input 
+                                type="text"
+                                className="w-full text-xs font-mono font-bold uppercase tracking-wider bg-white border border-slate-200 rounded-lg p-2 focus:outline-none focus:border-pink-500"
+                                placeholder="e.g. 8K90LMD2"
+                                value={checkoutTxId}
+                                onChange={(e) => setCheckoutTxId(e.target.value.toUpperCase())}
+                              />
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="text-slate-400 text-[10.5px] font-bold">No accounts configured.</p>
+                        )}
+                      </div>
+                    );
+                  })()}
+
+                  {/* TOTAL AMOUNT INFO & SUBMIT BUTTON */}
+                  {(() => {
+                    const matchedDistrict = deliveryCharges.find(dc => dc.id === checkoutDistrictId);
+                    const isFreeDeliveryApplied = isFreeDeliveryActive && selectedCartItems.some(item => item.product.isFlash);
+                    const deliveryCostAmount = isFreeDeliveryApplied ? 0 : (matchedDistrict ? matchedDistrict.charge : 0);
+                    const finalTotalSum = Math.max(0, cartSubtotal - promoDiscountAmount) + deliveryCostAmount - appliedAffiliateDiscount;
+
+                    return (
+                      <div className="pt-2 border-t mt-4 space-y-3 font-sans text-xs">
+                        <div className="flex justify-between text-xs font-extrabold text-slate-900 leading-none">
+                          <span className="uppercase tracking-wider text-[10px] font-black text-slate-500">{lang === 'en' ? 'Total Invoice Amount' : 'সর্বমোট ইনভয়েস বিল'}</span>
+                          <span className="text-[#f85606] text-sm sm:text-base font-black">৳ {finalTotalSum}</span>
+                        </div>
+
+                        {/* Submit Order Action */}
+                        <div className="pt-3">
+                          <button 
+                            type="button"
+                            onClick={() => {
+                              if (!checkoutPaymentMethod) {
+                                showNotif(lang === 'en' ? "Please select a payment method." : "অনুগ্রহ করে একটি কুরিয়ার পেমেন্ট মাধ্যম নির্বাচন করুন।", "error");
+                                return;
+                              }
+                              if (checkoutPaymentMethod !== 'COD' && checkoutPaymentMethod !== 'Card') {
+                                if (!checkoutTxId.trim() || !checkoutSenderNo.trim()) {
+                                  showNotif(
+                                    lang === 'en' 
+                                      ? "Please provide sender mobile and transaction ID."
+                                      : "অনুগ্রহ করে প্রেরক মোবাইল এবং ট্রানজেকশন আইডি প্রদান করুন।", 
+                                    "error"
+                                  );
+                                  return;
+                                }
+                              }
+                              handleCheckout();
+                            }}
+                            className="w-full bg-[#f85606] hover:bg-[#d04600] text-white font-extrabold uppercase py-3.5 rounded-xl text-xs tracking-wider transition-all shadow-md active:scale-95 cursor-pointer text-center"
+                          >
+                            {lang === 'en' ? 'Confirm Payment & Order' : 'পেমেন্ট ও অর্ডার কনফার্ম করুন'}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               ) : (
                 <div className="space-y-4">
+                  <div className="flex justify-between items-center mb-4 pb-3 border-b">
+                    <h3 className="font-extrabold text-base flex items-center gap-2 text-slate-900">
+                      <ShoppingCart className="w-4 h-4 text-pink-500" /> My Checkout Cart
+                    </h3>
+                    <button onClick={() => setShowCartModal(false)} className="text-slate-400 hover:text-slate-600">
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
                   {/* Cart Product rows */}
                   <div className="space-y-2.5 max-h-[25vh] overflow-y-auto p-1 bg-slate-50 rounded-xl">
-                    {cart.map((item) => (
+                    {(isDirectBuyActive && directBuyItem ? [directBuyItem] : cart).map((item) => (
                       <div key={item.cartId} className="flex gap-3 bg-white p-3 rounded-lg border border-slate-100 flex-wrap sm:flex-nowrap">
                         <img 
                           src={item.product.img} 
@@ -6689,7 +8811,7 @@ export default function CustomerStore({
                         totalAdvanceRequired = advanceConfig.fixedAmount || 0;
                       }
                     } else {
-                      totalAdvanceRequired = cart.reduce((sum, item) => {
+                      totalAdvanceRequired = selectedCartItems.reduce((sum, item) => {
                         if (item.product.requireAdvance) {
                           return sum + (item.product.advanceAmount || 0) * item.qty;
                         }
@@ -6780,7 +8902,7 @@ export default function CustomerStore({
                     const matchedDistrict = deliveryCharges.find(dc => dc.id === checkoutDistrictId);
                     const isFreeDeliveryApplied = isFreeDeliveryActive && selectedCartItems.some(item => item.product.isFlash);
                     const deliveryCostAmount = isFreeDeliveryApplied ? 0 : (matchedDistrict ? matchedDistrict.charge : 0);
-                    const finalTotalSum = Math.max(0, cartSubtotal - promoDiscountAmount) + deliveryCostAmount;
+                    const finalTotalSum = Math.max(0, cartSubtotal - promoDiscountAmount) + deliveryCostAmount - appliedAffiliateDiscount;
 
                     let totalAdvanceRequired = 0;
                     if (advanceConfig && advanceConfig.requireAdvance) {
@@ -6790,7 +8912,7 @@ export default function CustomerStore({
                         totalAdvanceRequired = advanceConfig.fixedAmount || 0;
                       }
                     } else {
-                      totalAdvanceRequired = cart.reduce((sum, item) => {
+                      totalAdvanceRequired = selectedCartItems.reduce((sum, item) => {
                         if (item.product.requireAdvance) {
                           return sum + (item.product.advanceAmount || 0) * item.qty;
                         }
@@ -6840,6 +8962,38 @@ export default function CustomerStore({
                               </button>
                             </div>
                           )}
+
+                          {/* Affiliate Balance Option */}
+                          {availableAffiliateBalance > 0 && (
+                            <div className="flex items-center justify-between gap-3 animate-fade-in pt-1.5 border-t border-dashed border-slate-200 mt-1.5">
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <Award className="w-3.5 h-3.5 text-pink-600 shrink-0" />
+                                <div className="min-w-0 text-left">
+                                  <p className="text-[10px] sm:text-[11px] font-bold text-slate-800 leading-tight">
+                                    {lang === 'en' ? 'Use Affiliate Balance' : 'এফিলিয়েট ব্যালেন্স ব্যবহার করুন'}
+                                  </p>
+                                  <p className="text-[9.5px] text-pink-500 font-extrabold mt-0.5 leading-none">
+                                    {lang === 'en' ? `Available Balance: ৳${availableAffiliateBalance.toFixed(2)}` : `উপলব্ধ ব্যালেন্স: ৳${availableAffiliateBalance.toFixed(2)}`}
+                                  </p>
+                                </div>
+                              </div>
+                              
+                              {/* Custom Switch / Slide Toggle Button */}
+                              <button
+                                type="button"
+                                onClick={() => setUseAffiliateBalance(!useAffiliateBalance)}
+                                className={`relative inline-flex h-4 w-8 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                                  useAffiliateBalance ? 'bg-pink-500' : 'bg-slate-200'
+                                }`}
+                              >
+                                <span
+                                  className={`pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
+                                    useAffiliateBalance ? 'translate-x-4' : 'translate-x-0'
+                                  }`}
+                                />
+                              </button>
+                            </div>
+                          )}
                         </div>
 
                         <div className="flex justify-between items-baseline">
@@ -6853,6 +9007,15 @@ export default function CustomerStore({
                               Promo Code Discount ({appliedPromo.code})
                             </span>
                             <span className="font-mono font-extrabold text-emerald-700">-৳{promoDiscountAmount}</span>
+                          </div>
+                        )}
+                        {appliedAffiliateDiscount > 0 && (
+                          <div className="flex justify-between items-center text-[11px] text-pink-650 border-b pb-2 animate-fade-in font-semibold">
+                            <span className="flex items-center gap-1">
+                              <Award className="w-3.5 h-3.5 shrink-0" />
+                              {lang === 'en' ? 'Affiliate Balance Used:' : 'এফিলিয়েট ব্যালেন্স ব্যবহার:'}
+                            </span>
+                            <span className="font-mono font-extrabold text-pink-600">-৳{appliedAffiliateDiscount}</span>
                           </div>
                         )}
                         <div className="flex justify-between text-[11px] text-slate-500 border-b pb-2 font-semibold">
@@ -6936,45 +9099,108 @@ export default function CustomerStore({
                 </button>
               </div>
 
-              <form onSubmit={handleJoinSellerSubmit} className="space-y-4">
-                <div className="form-group">
-                  <label className="form-label">Full Partner Name</label>
-                  <input 
-                    type="text" 
-                    className="form-input" 
-                    required 
-                    value={sellerData.name}
-                    onChange={(e) => setSellerData({ ...sellerData, name: e.target.value })}
-                  />
+              {isResellerRegSuccess && lastSubmittedSeller ? (
+                <div className="text-center py-6 px-1 space-y-5 animate-fade-in text-slate-800">
+                  <div className="w-16 h-16 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center mx-auto shadow-xs">
+                    <Check className="w-8 h-8 font-extrabold" />
+                  </div>
+                  
+                  <div className="space-y-1.5 font-sans">
+                    <h4 className="font-extrabold text-base text-slate-900">
+                      Application Submitted!
+                    </h4>
+                    <p className="text-[11.5px] text-slate-500 font-semibold leading-relaxed">
+                      Your reseller application is successfully received. Please connect with our desk via WhatsApp to activate your reseller account.
+                    </p>
+                  </div>
+
+                  <div className="bg-slate-50 rounded-2xl p-4 border text-left text-xs text-slate-650 space-y-1.5 font-semibold font-sans">
+                    <div>Name: <span className="text-slate-900 font-extrabold">{lastSubmittedSeller.name}</span></div>
+                    <div>Phone: <span className="text-slate-900 font-mono font-extrabold">{lastSubmittedSeller.phone}</span></div>
+                    {lastSubmittedSeller.details && (
+                      <div className="text-[11px] leading-tight text-slate-450 mt-1 pl-2 border-l-2 border-slate-200 font-medium">
+                        {lastSubmittedSeller.details}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="pt-2">
+                    <a 
+                      href={`https://wa.me/8801735165971?text=${encodeURIComponent(
+                        `আসসালামু আলাইকুম,\nআমি রিসেলার হিসেবে রেজিস্ট্রেশন করেছি।\n\nনাম: ${lastSubmittedSeller.name}\nমোবাইল: ${lastSubmittedSeller.phone}\nঅভিজ্ঞতা: ${lastSubmittedSeller.details || 'N/A'}\n\nদয়া করে দ্রুত আমার অ্যাকাউন্টটি একটিভেট করে দিন। ধন্যবাদ!`
+                      )}`}
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold py-3.5 rounded-xl text-xs flex items-center justify-center gap-2 shadow-md shadow-emerald-500/10 active:scale-95 transition-all text-center cursor-pointer font-sans"
+                    >
+                      <MessageSquare className="w-4 h-4 shrink-0" />
+                      <span>Message on WhatsApp</span>
+                    </a>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsResellerRegSuccess(false);
+                      setShowSellerModal(false);
+                    }}
+                    className="text-[11px] font-bold text-slate-400 hover:text-slate-650 underline cursor-pointer mt-2"
+                  >
+                    Close Window
+                  </button>
                 </div>
-                <div className="form-group">
-                  <label className="form-label">Primary Mobile Phone Contact</label>
-                  <input 
-                    type="tel" 
-                    className="form-input" 
-                    required 
-                    value={sellerData.phone}
-                    onChange={(e) => setSellerData({ ...sellerData, phone: e.target.value })}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Brief Background (Reseller Experience)</label>
-                  <textarea 
-                    rows={3} 
-                    className="form-input" 
-                    placeholder="Provide details about your selling networks or offline reach..."
-                    value={sellerData.details}
-                    onChange={(e) => setSellerData({ ...sellerData, details: e.target.value })}
-                  />
-                </div>
-                <div className="bg-slate-50 border p-3.5 rounded-xl text-[10px] text-slate-500 flex items-start gap-2 leading-relaxed">
-                  <AlertCircle className="w-4 h-4 text-pink-500 mt-0.5 flex-shrink-0" />
-                  <span>Approved partners unlock specialized dashboard, custom markup pricing tools, KYC portals, and fast wallet payouts.</span>
-                </div>
-                <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold py-3 rounded-xl text-xs uppercase tracking-wider">
-                  Request Activation Credentials
-                </button>
-              </form>
+              ) : (
+                <form onSubmit={handleJoinSellerSubmit} className="space-y-4">
+                  <div className="form-group pb-1">
+                    <label className="form-label text-[11px] font-bold text-slate-700 block mb-1">Full Partner Name</label>
+                    <input 
+                      type="text" 
+                      className="w-full border border-slate-250 hover:border-slate-350 focus:border-indigo-500 bg-slate-50/20 rounded-xl px-4 py-2.5 font-semibold text-slate-900 focus:outline-none" 
+                      required 
+                      value={sellerData.name}
+                      onChange={(e) => setSellerData({ ...sellerData, name: e.target.value })}
+                    />
+                  </div>
+                  <div className="form-group pb-1">
+                    <label className="form-label text-[11px] font-bold text-slate-700 block mb-1">Primary Mobile Phone Contact</label>
+                    <input 
+                      type="tel" 
+                      className="w-full border border-slate-250 hover:border-slate-350 focus:border-indigo-500 bg-slate-50/20 rounded-xl px-4 py-2.5 font-semibold text-slate-900 focus:outline-none" 
+                      required 
+                      value={sellerData.phone}
+                      onChange={(e) => setSellerData({ ...sellerData, phone: e.target.value })}
+                    />
+                  </div>
+                  <div className="form-group pb-1">
+                    <label className="form-label text-[11px] font-bold text-slate-700 block mb-1">Brief Background (Reseller Experience)</label>
+                    <textarea 
+                      rows={3} 
+                      className="w-full border border-slate-250 hover:border-slate-350 focus:border-indigo-500 bg-slate-50/20 rounded-xl px-4 py-2.5 font-semibold text-slate-900 focus:outline-none" 
+                      placeholder="Provide details about your selling networks or offline reach..."
+                      value={sellerData.details}
+                      onChange={(e) => setSellerData({ ...sellerData, details: e.target.value })}
+                    />
+                  </div>
+                  <div className="form-group pb-1">
+                    <label className="form-label text-[11px] font-bold text-slate-700 block mb-1">Referral Code (ঐচ্ছিক / Optional)</label>
+                    <input 
+                      type="text" 
+                      className="w-full border border-slate-250 hover:border-slate-350 focus:border-indigo-500 bg-slate-50/20 rounded-xl px-4 py-2.5 font-mono font-bold text-slate-900 focus:outline-none" 
+                      placeholder="e.g. #001"
+                      value={sellerData.referredByCode}
+                      onChange={(e) => setSellerData({ ...sellerData, referredByCode: e.target.value })}
+                    />
+                    <p className="text-[9px] text-slate-400 mt-1">If referred by an active partner, enter their Reseller Code.</p>
+                  </div>
+                  <div className="bg-slate-50 border p-3.5 rounded-xl text-[10px] text-slate-500 flex items-start gap-2 leading-relaxed">
+                    <AlertCircle className="w-4 h-4 text-pink-500 mt-0.5 flex-shrink-0" />
+                    <span>Approved partners unlock specialized dashboard, custom markup pricing tools, KYC portals, and fast wallet payouts.</span>
+                  </div>
+                  <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold py-3.5 rounded-xl text-xs uppercase tracking-wider transition-all active:scale-95 cursor-pointer">
+                    Request Activation Credentials
+                  </button>
+                </form>
+              )}
             </motion.div>
           </div>
         )}
@@ -7035,6 +9261,424 @@ export default function CustomerStore({
         )}
       </AnimatePresence>
 
+      {/* Reseller Subscription Payment Modal */}
+      <AnimatePresence>
+        {selectedSubPackage && (
+          <div className="fixed inset-0 z-55 flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }} 
+              animate={{ opacity: 1 }} 
+              exit={{ opacity: 0 }}
+              onClick={() => {
+                if (!isSubSuccess) {
+                  setSelectedSubPackage(null);
+                }
+              }}
+              className="absolute inset-0 bg-slate-900/60 backdrop-blur-xs z-50"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }} 
+              animate={{ opacity: 1, scale: 1, y: 0 }} 
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white rounded-[24px] shadow-2xl relative w-full max-w-md overflow-hidden z-230 text-slate-800 font-sans flex flex-col max-h-[90vh]"
+            >
+              {/* Header */}
+              <div className="bg-gradient-to-r from-pink-500 to-rose-500 p-5 text-white flex items-center justify-between">
+                <div>
+                  <h4 className="font-extrabold text-sm uppercase tracking-wide">
+                    {lang === 'bn' ? 'প্রিমিয়াম প্যাক পেমেন্ট' : 'Premium Subscription Payment'}
+                  </h4>
+                  <p className="text-[10px] text-pink-100 mt-1">
+                    {lang === 'bn' ? 'আপনার কাঙ্ক্ষিত প্যাকেজটি সাবস্ক্রাইব করুন' : 'Subscribe to your desired reseller package'}
+                  </p>
+                </div>
+                <button 
+                  onClick={() => setSelectedSubPackage(null)} 
+                  className="text-white/80 hover:text-white hover:opacity-100 cursor-pointer p-1 rounded-full hover:bg-white/10"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Body */}
+              <div className="p-6 space-y-4 overflow-y-auto">
+                {!isSubSuccess ? (
+                  <>
+                    {/* Selected Package Details */}
+                    <div className="bg-pink-50/40 border border-pink-100/65 p-4 rounded-2xl flex justify-between items-center bg-white">
+                      <div>
+                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Selected Plan</p>
+                        <h5 className="font-extrabold text-slate-850 text-sm">{selectedSubPackage.name}</h5>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Total Amount</p>
+                        <p className="text-rose-600 font-black text-lg">৳{selectedSubPackage.price}</p>
+                      </div>
+                    </div>
+
+                    {subStep === 1 ? (
+                      /* STEP 1: Registration Details */
+                      <div className="space-y-3">
+                        <div className="border-b pb-2 mb-2">
+                          <h5 className="font-bold text-xs text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+                            <span className="w-5 h-5 rounded-full bg-pink-500 text-white flex items-center justify-center font-bold text-[10px]">1</span>
+                            {lang === 'bn' ? 'নিবন্ধন তথ্য প্রদান করুন' : 'Enter Reseller Profile Registry'}
+                          </h5>
+                          <p className="text-[10px] text-slate-400 mt-1">
+                            {lang === 'bn' ? 'অনুগ্রহ করে রিসেলার পোর্টালে লগইন করার প্রয়োজনীয় তথ্য দিন।' : 'Create credentials to log in to the Reseller Dashboard after approval.'}
+                          </p>
+                        </div>
+
+                        <div className="space-y-2.5 text-xs">
+                          <div>
+                            <label className="block text-[11px] font-bold text-slate-700 mb-1">{lang === 'bn' ? 'পূর্ণ নাম' : 'Full Name'} <span className="text-pink-500">*</span></label>
+                            <input 
+                              type="text"
+                              required
+                              placeholder="e.g. Abul Hasan"
+                              className="w-full px-3 py-2 rounded-xl border border-slate-250 focus:border-pink-550 focus:outline-none font-semibold bg-slate-50/20 text-slate-800"
+                              value={subRegName}
+                              onChange={(e) => setSubRegName(e.target.value)}
+                            />
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-700 mb-1">{lang === 'bn' ? 'লগইন ইমেইল এড্রেস' : 'Login Email Address'} <span className="text-pink-500">*</span></label>
+                              <input 
+                                type="email"
+                                required
+                                placeholder="name@example.com"
+                                className="w-full px-3 py-2 rounded-xl border border-slate-250 focus:border-pink-550 focus:outline-none font-semibold bg-slate-50/20 text-slate-800"
+                                value={subRegEmail}
+                                onChange={(e) => setSubRegEmail(e.target.value)}
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-700 mb-1">{lang === 'bn' ? 'মোবাইল নাম্বার' : 'Mobile Phone Number'} <span className="text-pink-500">*</span></label>
+                              <input 
+                                type="tel"
+                                required
+                                placeholder="017XXXXXXXX"
+                                className="w-full px-3 py-2 rounded-xl border border-slate-250 focus:border-pink-550 focus:outline-none font-semibold bg-slate-50/20 text-slate-800 font-mono"
+                                value={subRegPhone}
+                                onChange={(e) => setSubRegPhone(e.target.value)}
+                              />
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-700 mb-1">{lang === 'bn' ? 'ব্যবসার নাম' : 'Business Name'} <span className="text-pink-500">*</span></label>
+                              <input 
+                                type="text"
+                                required
+                                placeholder="e.g. Hasan Reselling"
+                                className="w-full px-3 py-2 rounded-xl border border-slate-250 focus:border-pink-550 focus:outline-none font-semibold bg-slate-50/20 text-slate-800"
+                                value={subRegBusinessName}
+                                onChange={(e) => setSubRegBusinessName(e.target.value)}
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-700 mb-1">{lang === 'bn' ? 'লগইন পাসওয়ার্ড (Password)' : 'Account Password'} <span className="text-pink-500">*</span></label>
+                              <div className="relative">
+                                <input 
+                                  type={showSubRegPass ? "text" : "password"}
+                                  required
+                                  placeholder="••••••••"
+                                  className="w-full pl-3 pr-10 py-2 rounded-xl border border-slate-250 focus:border-pink-550 focus:outline-none font-semibold bg-slate-50/20 text-slate-800"
+                                  value={subRegPassword}
+                                  onChange={(e) => setSubRegPassword(e.target.value)}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => setShowSubRegPass(!showSubRegPass)}
+                                  className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-450 hover:text-slate-600 flex items-center bg-transparent border-none cursor-pointer"
+                                >
+                                  {showSubRegPass ? <EyeOff size={16} /> : <Eye size={16} />}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] font-bold text-slate-700 mb-1">{lang === 'bn' ? 'স্থায়ী ঠিকানা (Address)' : 'Full Address'} <span className="text-pink-500">*</span></label>
+                            <textarea 
+                              rows={2}
+                              required
+                              placeholder="e.g. Plot 24, Road 15, Sector 3, Uttara, Dhaka"
+                              className="w-full px-3 py-2 rounded-xl border border-slate-250 focus:border-pink-550 focus:outline-none font-semibold bg-slate-50/20 text-slate-800"
+                              value={subRegAddress}
+                              onChange={(e) => setSubRegAddress(e.target.value)}
+                            />
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!subRegName.trim() || !subRegEmail.trim() || !subRegPhone.trim() || !subRegAddress.trim() || !subRegBusinessName.trim() || !subRegPassword.trim()) {
+                              showNotif(lang === 'bn' ? "দয়া করে সব তারকাচিহ্নিত (*) তথ্য প্রদান করুন!" : "Please fill in all required (*) registration credentials!", "error");
+                              return;
+                            }
+                            if (users.some(u => u.email.toLowerCase() === subRegEmail.trim().toLowerCase())) {
+                              showNotif(lang === 'bn' ? "এই ইমেইলটি ইতিমধ্যে নিবন্ধিত রয়েছে!" : "This email address is already registered!", "error");
+                              return;
+                            }
+                            setSubStep(2);
+                          }}
+                          className="w-full bg-slate-900 hover:bg-slate-850 text-white font-extrabold py-3.5 rounded-2xl text-xs uppercase tracking-wider transition-all cursor-pointer shadow-md mt-4 flex items-center justify-center gap-2"
+                        >
+                          <span>{lang === 'bn' ? 'পরবর্তী ধাপে যান (পেমেন্ট)' : 'Proceed to Payment Step ➔'}</span>
+                        </button>
+                      </div>
+                    ) : (
+                      /* STEP 2: Choose Payment Method & Input TrxID */
+                      <div className="space-y-4 animate-fade-in">
+                        <div className="border-b pb-2">
+                          <button 
+                            type="button" 
+                            onClick={() => setSubStep(1)}
+                            className="text-[10px] text-pink-600 hover:text-pink-700 font-bold flex items-center gap-1 mb-2"
+                          >
+                            ← {lang === 'bn' ? 'তথ্য পরিবর্তন করুন' : 'Edit Registration Info'}
+                          </button>
+                          <h5 className="font-bold text-xs text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+                            <span className="w-5 h-5 rounded-full bg-pink-500 text-white flex items-center justify-center font-bold text-[10px]">2</span>
+                            {lang === 'bn' ? 'সাবস্ক্রプション ফি পেমেন্ট করুন' : 'Submit Subscription Payment'}
+                          </h5>
+                        </div>
+
+                        {/* Step 1: Payment Method Selection */}
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold text-slate-700 block">
+                            {lang === 'bn' ? '১. পেমেন্ট অপশন পছন্দ করুন:' : '1. Choose Payment Method:'}
+                          </label>
+                          <div className="grid grid-cols-2 gap-2.5">
+                            {[
+                              { id: 'bKash', label: 'bKash (বিকাশ)', color: 'border-pink-550 text-pink-600 bg-pink-100/10' },
+                              { id: 'Nagad', label: 'Nagad (নগদ)', color: 'border-orange-500 text-orange-600 bg-orange-100/10' },
+                              { id: 'Rocket', label: 'Rocket (রকেট)', color: 'border-purple-650 text-purple-700 bg-purple-100/10' },
+                              { id: 'Bank', label: 'Bank Transfer', color: 'border-blue-650 text-blue-750 bg-blue-100/10' },
+                            ].map((method) => {
+                              const isSel = subPaymentMethod === method.id;
+                              return (
+                                <button
+                                  key={method.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setSubPaymentMethod(method.id as any);
+                                  }}
+                                  className={`p-3 rounded-xl border-2 text-left transition-all active:scale-95 text-xs font-black flex items-center justify-between cursor-pointer ${
+                                    isSel 
+                                      ? `${method.color} border-pink-500 ring-2 ring-pink-500/20` 
+                                      : 'border-slate-200/80 hover:border-slate-350 bg-white text-slate-700'
+                                  }`}
+                                >
+                                  <span>{method.label}</span>
+                                  {isSel && (
+                                    <span className="w-2.5 h-2.5 rounded-full bg-pink-600" />
+                                  )}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Payment Instruction Details based on method */}
+                        {subPaymentMethod && (
+                          <motion.div 
+                            initial={{ opacity: 0, y: -5 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="p-4 rounded-xl border border-dashed bg-slate-50 border-slate-300 text-xs text-slate-650 leading-relaxed space-y-1.5"
+                          >
+                            {subPaymentMethod !== 'Bank' ? (
+                              <>
+                                <p className="font-extrabold text-slate-800">
+                                  {lang === 'bn' ? 'পেমেন্ট নির্দেশাবলী:' : 'Payment Instructions:'}
+                                </p>
+                                <p>
+                                  {lang === 'bn' ? 'দয়া করে নিচের পার্সোনাল নাম্বারে ' : 'Please Send Money to the following number via '}
+                                  <span className="font-black text-rose-600">{subPaymentMethod}</span>:
+                                </p>
+                                <p className="text-sm font-black text-slate-900 bg-white p-2 border border-slate-200 rounded-lg text-center select-all">
+                                  01735165971
+                                </p>
+                                <p>
+                                  {lang === 'bn' ? `পাঠানোর মোট টাকার পরিমাণ: ` : 'Exact total to send: '}
+                                  <span className="font-black text-slate-900">৳{selectedSubPackage.price}</span>
+                                </p>
+                                <p className="text-[10px] text-slate-400 font-semibold italic">
+                                  {lang === 'bn' ? '*টাকা পাঠানোর পর ট্রানজেকশন আইডি (TrxID) নিচে ইনপুট দিন।' : '*After sending the amount, enter the Transaction ID (TrxID) below.'}
+                                </p>
+                              </>
+                            ) : (
+                              <>
+                                <p className="font-extrabold text-slate-800">
+                                  {lang === 'bn' ? 'ব্যাংক ট্রান্সফার তথ্য:' : 'Bank Transfer Guidelines:'}
+                                </p>
+                                <div className="space-y-0.5 text-[11px]">
+                                  <div>Bank Name: <span className="font-extrabold">BRAC Bank plc</span></div>
+                                  <div>Account Name: <span className="font-extrabold">DEALY SOLUTIONS</span></div>
+                                  <div>Account No: <span className="font-extrabold font-mono text-sm leading-tight text-slate-900 bg-white px-1 select-all border border-slate-100 rounded">12224567890123</span></div>
+                                  <div>Branch Name: <span className="font-extrabold">Mirpur 10 Branch, Dhaka</span></div>
+                                  <div>Amount: <span className="font-extrabold text-rose-600">৳{selectedSubPackage.price}</span></div>
+                                </div>
+                                <p className="text-[10px] text-slate-400 font-semibold italic pt-1 border-t border-slate-200">
+                                  {lang === 'bn' ? '*টাকা ট্রান্সফার করার পর রেফারেন্স নাম্বার বা ট্রানজেকশন আইডি নিচে প্রদান করবেন।' : '*Provide payment reference or bank transfer Reference ID in the field below.'}
+                                </p>
+                              </>
+                            )}
+                          </motion.div>
+                        )}
+
+                        {/* Step 2: Transaction ID Input */}
+                        {subPaymentMethod && (
+                          <div className="space-y-1.5">
+                            <label className="text-xs font-bold text-slate-700 block">
+                              {lang === 'bn' ? '২. ট্রানজেকশন আইডি (TrxID) দিন:' : '2. Enter Transaction ID / Ref No:'}
+                            </label>
+                            <input
+                              type="text"
+                              required
+                              value={subTrxId}
+                              onChange={(e) => setSubTrxId(e.target.value)}
+                              placeholder={subPaymentMethod === 'Bank' ? "Bank Transfer Ref or Slip ID" : "8A9BD7CX9K"}
+                              className="w-full px-4 py-2.5 rounded-xl border border-slate-250 focus:border-pink-500 focus:outline-none font-bold text-sm tracking-wide bg-slate-50/20 text-slate-850"
+                            />
+                          </div>
+                        )}
+
+                        {/* Submit Confirmation Button */}
+                        <button
+                          type="button"
+                          disabled={!subPaymentMethod || !subTrxId.trim()}
+                          onClick={() => {
+                            if (!subPaymentMethod) {
+                              showNotif("Please select a payment method!", "error");
+                              return;
+                            }
+                            if (!subTrxId.trim()) {
+                              showNotif("Please enter your transaction ID!", "error");
+                              return;
+                            }
+
+                            // CREATE PENDING USER ACCOUNT IN SYSTEM!
+                            if (setUsers) {
+                              const newReseller: User = {
+                                id: `reseller_${Date.now()}`,
+                                name: subRegName.trim(),
+                                email: subRegEmail.trim(),
+                                phone: subRegPhone.trim(),
+                                pass: subRegPassword.trim(),
+                                role: 'user',
+                                idCode: '#' + String((users || []).filter(u => u.role === 'user').length + 1).padStart(3, '0'),
+                                banned: false,
+                                balance: 0,
+                                kyc: { status: 'unverified', nidName: '', nidNumber: '', dob: '', frontImage: '', backImage: '' },
+                                activities: [
+                                  {
+                                    id: `act_${Date.now()}`,
+                                    type: 'profit',
+                                    amount: 0,
+                                    desc: `Registered: Placed subscription request for ${selectedSubPackage.name} (${selectedSubPackage.duration}) with trx ID ${subTrxId}.`,
+                                    date: formatToDhakaDateOnly()
+                                  }
+                                ],
+                                status: 'pending', // Pending approval from Admin
+                                address: subRegAddress.trim(),
+                                businessName: subRegBusinessName.trim(),
+                                pendingSubscription: {
+                                  packageId: selectedSubPackage.id,
+                                  packageName: selectedSubPackage.name,
+                                  price: selectedSubPackage.price,
+                                  duration: selectedSubPackage.duration,
+                                  paymentMethod: subPaymentMethod,
+                                  trxId: subTrxId.trim(),
+                                  date: getDhakaDate().toISOString()
+                                }
+                              };
+                              setUsers(prev => [newReseller, ...(prev || [])]);
+                            }
+
+                            setIsSubSuccess(true);
+                            showNotif("Subscription payment successfully submitted for review!", "success");
+                          }}
+                          className="w-full bg-slate-950 hover:bg-slate-850 disabled:opacity-40 disabled:cursor-not-allowed text-white font-extrabold py-3.5 rounded-2xl text-xs uppercase tracking-wider transition-all cursor-pointer shadow-md mt-2 flex items-center justify-center gap-2"
+                        >
+                          <span>{lang === 'bn' ? 'পেমেন্ট নিশ্চিত করুন' : 'Confirm Subscription Payment'}</span>
+                        </button>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  /* Success View */
+                  <div className="text-center py-6 px-2 space-y-5 animate-fade-in">
+                    <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto text-emerald-600 shadow-md">
+                      <Check className="w-8 h-8 font-extrabold" />
+                    </div>
+
+                    <div className="space-y-2">
+                      <h4 className="font-extrabold text-base text-slate-900">
+                        {lang === 'bn' ? 'পেমেন্ট রিকোয়েস্ট সফল হয়েছে!' : 'Payment Review Submitted!'}
+                      </h4>
+                      <p className="text-xs text-slate-500 leading-relaxed font-semibold">
+                        {lang === 'bn' 
+                          ? 'আপনার পেমেন্ট রিকোয়েস্টটি পর্যালোচনার জন্য জমা দেওয়া হয়েছে। আমাদের অ্যাকাউন্টস টিম শীঘ্রই ট্রানজেকশন চেক করে আপনার রিসেলার প্যাকটি অ্যাক্টিভেট করে দেবে। দ্রুত অনুমোদনের জন্য নিচে হোয়াটসঅ্যাপ করুন।'
+                          : 'Your subscription request has been received. Our accounts team will verify the payment and activate your premium reseller benefits shortly. To expedite, please send a message on WhatsApp.'
+                        }
+                      </p>
+                    </div>
+
+                    {/* Informational Payment Slip */}
+                    <div className="bg-slate-50 rounded-2xl p-4 border text-left text-xs text-slate-600 space-y-1.5 font-semibold">
+                      <div className="flex justify-between border-b pb-1.5 mb-1.5 border-slate-200">
+                        <span className="text-slate-400">Package:</span>
+                        <span className="text-slate-900 font-extrabold">{selectedSubPackage.name}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-400">Amount Paid:</span>
+                        <span className="text-rose-600 font-black">৳{selectedSubPackage.price}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-400">Method:</span>
+                        <span className="text-slate-900 font-black">{subPaymentMethod}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-400">Transaction ID:</span>
+                        <span className="text-slate-900 font-mono font-bold">{subTrxId}</span>
+                      </div>
+                    </div>
+
+                    <div className="pt-2">
+                      <a 
+                        href={`https://wa.me/8801735165971?text=${encodeURIComponent(
+                          `আসসালামু আলাইকুম,\nআমি প্রিমিয়াম রিসেলার প্যাকেজ সাবস্ক্রাইব করেছি।\n\nপ্যাকেজ: ${selectedSubPackage.name}\nমূল্য: ৳${selectedSubPackage.price}\nমাধ্যম: ${subPaymentMethod}\nTrx ID: ${subTrxId}\n\nদয়া করে দ্রুত একটিভেট করে দিন। ধন্যবাদ!`
+                        )}`}
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold py-3.5 rounded-2xl text-xs flex items-center justify-center gap-2 shadow-md shadow-emerald-600/10 active:scale-95 transition-all text-center cursor-pointer font-sans"
+                      >
+                        <MessageSquare className="w-5 h-5 shrink-0" /> 
+                        <span>{lang === 'bn' ? 'হোয়াটসঅ্যাপে মেসেজ দিন' : 'Send Message on WhatsApp'}</span>
+                      </a>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setSelectedSubPackage(null)}
+                      className="text-xs text-slate-400 hover:text-slate-600 underline font-bold cursor-pointer mt-2 block mx-auto"
+                    >
+                      {lang === 'bn' ? 'বন্ধ করুন' : 'Close window'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
 
 
     </div>
@@ -7042,19 +9686,13 @@ export default function CustomerStore({
 
   function handleBuyNow(prod: Product, q: number, col: string) {
     const cartId = `${prod.id}_${col}`;
-    setCart((prev) => {
-      const idx = prev.findIndex((item) => item.cartId === cartId);
-      if (idx > -1) {
-        const next = [...prev];
-        next[idx] = { ...next[idx], qty: next[idx].qty + q };
-        return next;
-      }
-      return [...prev, { product: prod, qty: q, color: col, cartId }];
-    });
+    const item = { product: prod, qty: q, color: col, cartId };
+    setDirectBuyItem(item);
+    setIsDirectBuyActive(true);
+    setIsCheckingOut(true);
     if (window.innerWidth < 768) {
       setViewingProduct(null);
       setShowCartPage(true);
-      setIsCheckingOut(true);
     } else {
       setShowCartModal(true);
     }

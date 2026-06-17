@@ -172,12 +172,21 @@ export const initialBanners: Banner[] = [
   }
 ];
 
+export const initialResellerBanners: Banner[] = [
+  {
+    id: 'rb1',
+    img: 'https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=1200&q=80',
+    isActive: true,
+    link: 'https://wa.me/8801735165971'
+  }
+];
+
 export const initialUsers: User[] = [
   {
     id: 'admin1',
     name: 'Dealy Executive Partner',
-    email: 'admin@panel.com',
-    pass: '123', // Will be hashed via simple password check or compared directly
+    email: 'mubarak06199@gmail.com',
+    pass: 'HRidoy009@@', // Will be hashed via simple password check or compared directly
     role: 'admin',
     idCode: 'ADMIN-001',
     banned: false,
@@ -202,6 +211,7 @@ export const initialUsers: User[] = [
       frontImage: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=400&q=80',
       backImage: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=400&q=80'
     },
+    subscriptionExpiresAt: '2026-08-07',
     activities: [
       {
         id: 'act1',
@@ -229,6 +239,7 @@ export const initialUsers: User[] = [
     banned: false,
     balance: 0,
     kyc: { status: 'pending', nidName: 'Sabbir Hossain', nidNumber: '9218374623', dob: '1998-04-20', frontImage: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=400&q=80', backImage: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=400&q=80' },
+    subscriptionExpiresAt: '2026-06-30',
     activities: []
   }
 ];

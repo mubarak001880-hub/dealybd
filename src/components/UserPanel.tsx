@@ -2,10 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   ShoppingBag, Package, Wallet, User as UserIcon, LogOut, ArrowRight, Truck, Info, CheckCircle, Clock, ChevronRight,
-  Smartphone, CreditCard, ShieldAlert, ArrowUpRight, ArrowDownRight, Upload, X, ShieldCheck, Search, Tag, DollarSign, Camera
+  Smartphone, CreditCard, ShieldAlert, ArrowUpRight, ArrowDownRight, Upload, X, ShieldCheck, Search, Tag, DollarSign, Camera,
+  Copy, Users, Share2, Check
 } from 'lucide-react';
-import { User, Product, Category, Order, Withdrawal, DeliveryCharge, FooterConfig } from '../types';
+import { User, Product, Category, Order, Withdrawal, DeliveryCharge, FooterConfig, Banner } from '../types';
+import { formatResellerId } from '../idUtils';
+import { getDhakaDate, formatToDhakaTime, formatToDhakaDateOnly } from '../dateUtils';
 import OrderTracker from './OrderTracker';
+import { TinyInvoiceDetails } from './TinyInvoiceDetails';
 import { generateTrackingId, createInitialTimeline } from '../data';
 
 interface UserPanelProps {
@@ -21,8 +25,59 @@ interface UserPanelProps {
   setWithdrawals: React.Dispatch<React.SetStateAction<Withdrawal[]>>;
   deliveryCharges: DeliveryCharge[];
   footerConfig: FooterConfig;
+  resellerBanners?: Banner[];
   onLogout: () => void;
   showNotif: (msg: string, type: 'success' | 'error') => void;
+}
+
+// Helper to calculate countdown for subscription
+function getSubscriptionCountdown(expiresAt?: string): string {
+  if (!expiresAt) {
+    return "No active subscription";
+  }
+  const expiryDate = getDhakaDate(expiresAt);
+  const now = getDhakaDate(new Date());
+  
+  const expiryStartOfDay = new Date(expiryDate.getFullYear(), expiryDate.getMonth(), expiryDate.getDate());
+  const nowStartOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+  if (expiryStartOfDay.getTime() < nowStartOfDay.getTime()) {
+    return "Expired";
+  }
+
+  if (expiryStartOfDay.getTime() === nowStartOfDay.getTime()) {
+    return "Expires today";
+  }
+
+  let yearDiff = expiryStartOfDay.getFullYear() - nowStartOfDay.getFullYear();
+  let monthDiff = expiryStartOfDay.getMonth() - nowStartOfDay.getMonth();
+  let dayDiff = expiryStartOfDay.getDate() - nowStartOfDay.getDate();
+
+  if (dayDiff < 0) {
+    const prevMonth = new Date(expiryStartOfDay.getFullYear(), expiryStartOfDay.getMonth(), 0);
+    dayDiff += prevMonth.getDate();
+    monthDiff--;
+  }
+
+  if (monthDiff < 0) {
+    monthDiff += 12;
+    yearDiff--;
+  }
+
+  const totalMonths = yearDiff * 12 + monthDiff;
+
+  const parts: string[] = [];
+  if (totalMonths > 0) {
+    parts.push(`${totalMonths} ${totalMonths === 1 ? 'month' : 'months'}`);
+  }
+  if (dayDiff > 0) {
+    parts.push(`${dayDiff} ${dayDiff === 1 ? 'day' : 'days'}`);
+  }
+
+  if (parts.length === 0) {
+    return "Expires today";
+  }
+  return parts.join(' ');
 }
 
 export default function UserPanel({
@@ -38,10 +93,11 @@ export default function UserPanel({
   setWithdrawals,
   deliveryCharges,
   footerConfig,
+  resellerBanners = [],
   onLogout,
   showNotif
 }: UserPanelProps) {
-  const [activeTab, setActiveTab] = useState<'shop' | 'orders' | 'wallet' | 'profile' | 'support'>('shop');
+  const [activeTab, setActiveTab] = useState<'shop' | 'orders' | 'wallet' | 'profile' | 'support' | 'referral'>('shop');
   const [customRates, setCustomRates] = useState<Record<string, number>>({});
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [orderDetails, setOrderDetails] = useState({ custName: '', custPhone: '', custAddress: '' });
@@ -51,6 +107,10 @@ export default function UserPanel({
   const [checkoutTxId, setCheckoutTxId] = useState('');
   const [selectedCat, setSelectedCat] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [orderFilter, setOrderFilter] = useState<'all' | 'Pending' | 'Approved' | 'Processing' | 'Shipped' | 'Delivered' | 'Cancelled' | 'Returned'>('all');
+
+  const [copiedCode, setCopiedCode] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
 
   // Modals
   const [showOrderModal, setShowOrderModal] = useState(false);
@@ -59,6 +119,66 @@ export default function UserPanel({
   const [showTrackerModal, setShowTrackerModal] = useState(false);
   const [trackingIdToView, setTrackingIdToView] = useState('');
   const [resellerDistrictId, setResellerDistrictId] = useState<string>('');
+  const [currentResellerBannerIdx, setCurrentResellerBannerIdx] = useState(0);
+
+  const [resellerBannerTouchStart, setResellerBannerTouchStart] = useState<number | null>(null);
+  const [resellerBannerTouchEnd, setResellerBannerTouchEnd] = useState<number | null>(null);
+  const [resellerBannerMouseDownX, setResellerBannerMouseDownX] = useState<number | null>(null);
+  const [isResellerBannerDragging, setIsResellerBannerDragging] = useState(false);
+
+  const handleResellerTouchStart = (e: React.TouchEvent) => {
+    setResellerBannerTouchStart(e.targetTouches[0].clientX);
+    setResellerBannerTouchEnd(e.targetTouches[0].clientX);
+  };
+
+  const handleResellerTouchMove = (e: React.TouchEvent) => {
+    setResellerBannerTouchEnd(e.targetTouches[0].clientX);
+  };
+
+  const handleResellerTouchEnd = () => {
+    if (resellerBannerTouchStart === null || resellerBannerTouchEnd === null) return;
+    const distance = resellerBannerTouchStart - resellerBannerTouchEnd;
+    const thresh = 40;
+    if (distance > thresh) {
+      setCurrentResellerBannerIdx(prev => (prev + 1) % resellerBanners.length);
+    } else if (distance < -thresh) {
+      setCurrentResellerBannerIdx(prev => (prev - 1 + resellerBanners.length) % resellerBanners.length);
+    }
+    setResellerBannerTouchStart(null);
+    setResellerBannerTouchEnd(null);
+  };
+
+  const handleResellerMouseDown = (e: React.MouseEvent) => {
+    setResellerBannerMouseDownX(e.clientX);
+    setIsResellerBannerDragging(true);
+  };
+
+  const handleResellerMouseUp = (e: React.MouseEvent) => {
+    if (!isResellerBannerDragging || resellerBannerMouseDownX === null) return;
+    const distance = resellerBannerMouseDownX - e.clientX;
+    const thresh = 40;
+    if (distance > thresh) {
+      setCurrentResellerBannerIdx(prev => (prev + 1) % resellerBanners.length);
+    } else if (distance < -thresh) {
+      setCurrentResellerBannerIdx(prev => (prev - 1 + resellerBanners.length) % resellerBanners.length);
+    }
+    setResellerBannerMouseDownX(null);
+    setIsResellerBannerDragging(false);
+  };
+
+  const handleResellerMouseLeave = () => {
+    setResellerBannerMouseDownX(null);
+    setIsResellerBannerDragging(false);
+  };
+
+  useEffect(() => {
+    if (resellerBanners.length > 1) {
+      const timer = setInterval(() => {
+        setCurrentResellerBannerIdx(prev => (prev + 1) % resellerBanners.length);
+      }, 5000);
+      return () => clearInterval(timer);
+    }
+  }, [resellerBanners.length]);
 
   useEffect(() => {
     if (deliveryCharges && deliveryCharges.length > 0 && !resellerDistrictId) {
@@ -156,7 +276,7 @@ export default function UserPanel({
       }
     }
 
-    const orderDateStr = new Date().toLocaleString();
+    const orderDateStr = formatToDhakaTime();
     const trackingId = generateTrackingId();
 
     const matchedDistrict = deliveryCharges.find(dc => dc.id === resellerDistrictId);
@@ -184,10 +304,13 @@ export default function UserPanel({
       timeline: createInitialTimeline(orderDateStr),
       advancePaid: totalAdvanceRequired > 0 ? totalAdvanceRequired : 0,
       txId: totalAdvanceRequired > 0 ? checkoutTxId.trim() : '',
-      paymentMethod: totalAdvanceRequired > 0 ? checkoutPaymentMethod : 'COD'
+      paymentMethod: totalAdvanceRequired > 0 ? checkoutPaymentMethod : 'COD',
+      productId: selectedProduct.id,
+      sellerId: selectedProduct.sellerId,
+      sellerName: selectedProduct.sellerName
     };
 
-    setOrders(prev => [...prev, newOrder]);
+    setOrders(prev => [newOrder, ...prev]);
     setCheckoutPaymentMethod('COD');
     setCheckoutTxId('');
     setShowOrderModal(false);
@@ -217,7 +340,7 @@ export default function UserPanel({
       activities: [
         {
           id: 'act_' + Date.now(),
-          date: new Date().toLocaleString(),
+          date: formatToDhakaTime(),
           type: 'withdraw',
           desc: `Withdrawal transfer via ${wdForm.method} requested`,
           amount: amt
@@ -234,7 +357,7 @@ export default function UserPanel({
       method: wdForm.method,
       account: wdForm.account.trim(),
       status: 'pending',
-      date: new Date().toLocaleDateString()
+      date: formatToDhakaDateOnly()
     };
 
     setWithdrawals(prev => [...prev, newWd]);
@@ -252,7 +375,28 @@ export default function UserPanel({
   };
 
   // Analytics Metrics
-  const myOrders = orders.filter(o => o.userId === currentUser.id);
+  const myOrders = orders
+    .filter(o => o.userId === currentUser.id)
+    .sort((a, b) => {
+      const aTimeStr = a.id.replace('o_demo', '').replace('o_', '');
+      const bTimeStr = b.id.replace('o_demo', '').replace('o_', '');
+      const aTimeNum = parseInt(aTimeStr, 10);
+      const bTimeNum = parseInt(bTimeStr, 10);
+      if (!isNaN(aTimeNum) && !isNaN(bTimeNum)) {
+        return bTimeNum - aTimeNum;
+      }
+      const aDate = Date.parse(a.date);
+      const bDate = Date.parse(b.date);
+      if (!isNaN(aDate) && !isNaN(bDate) && aDate !== bDate) {
+        return bDate - aDate;
+      }
+      return b.id.localeCompare(a.id);
+    });
+
+  const filteredMyOrders = orderFilter === 'all'
+    ? myOrders
+    : myOrders.filter(o => o.status === orderFilter);
+
   const clearedCommissions = (currentUser.activities || [])
     .filter(a => a.type === 'profit')
     .reduce((s, a) => s + a.amount, 0);
@@ -277,27 +421,33 @@ export default function UserPanel({
     <div className="flex flex-col h-screen bg-slate-50/80 font-sans text-slate-800">
       
       {/* GLOBAL HUD BAR */}
-      <header className="sticky top-0 z-40 bg-white border-b border-pink-100 text-slate-900 shadow-xs">
-        <div className="max-w-7xl mx-auto px-3 sm:px-6 h-13 sm:h-16 flex items-center justify-between">
-          <div className="flex items-center gap-1.5 sm:gap-3 min-w-0">
-            <div className="w-7 h-7 sm:w-9 sm:h-9 bg-pink-500 rounded-lg sm:rounded-xl flex items-center justify-center text-white text-xs sm:text-sm font-black animate-pulse shrink-0">
+      <header className="sticky top-0 z-40 bg-gradient-to-r from-pink-600 via-pink-500 to-rose-500 text-white shadow-md relative overflow-hidden">
+        {/* Subtle decorative background glow glows */}
+        <div className="absolute -left-12 -top-12 w-32 h-32 bg-white/10 rounded-full blur-2xl pointer-events-none" />
+        <div className="absolute right-0 top-0 w-32 h-32 bg-pink-400/20 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 sm:h-16 flex items-center justify-between relative z-10">
+          <div className="flex items-center gap-2.5 sm:gap-3.5 min-w-0">
+            <div className="w-8 h-8 sm:w-10 sm:h-10 bg-white text-pink-650 rounded-xl flex items-center justify-center font-black animate-pulse shrink-0 shadow-md">
               DL
             </div>
-            <span className="font-extrabold text-[11px] sm:text-sm md:text-base lg:text-lg tracking-tight uppercase text-pink-600 truncate">
-              DEALY <span className="text-slate-800">PARTNER HUB</span>
+            <span className="font-extrabold text-xs sm:text-base md:text-lg lg:text-xl tracking-tight uppercase truncate text-white">
+              DEALY <span className="text-pink-100 font-bold">PARTNER HUB</span>
             </span>
           </div>
 
           <div className="flex items-center gap-2 sm:gap-4 flex-shrink-0">
-            <div className="bg-pink-50 border border-pink-200/60 rounded-full px-2.5 sm:px-4 py-1 sm:py-1.5 flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-pink-500 shadow shadow-pink-500/50 block"></span>
-              <span className="text-[10px] sm:text-xs font-mono font-black text-pink-650">৳{currentUser.balance} CLEARED</span>
+            <div className="bg-white/15 border border-white/20 rounded-2xl px-3 sm:px-4 py-1 sm:py-1.5 flex items-center gap-2 shadow-inner">
+              <span className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-emerald-400 shadow shadow-emerald-400/50 block animate-pulse"></span>
+              <span className="text-[10px] sm:text-xs font-mono font-black text-white">৳{currentUser.balance} WALLET</span>
             </div>
             <button 
               onClick={onLogout} 
-              className="p-1.5 sm:p-2 rounded-full hover:bg-slate-100 text-slate-500 hover:text-pink-600 transition-colors cursor-pointer"
+              className="p-1.5 sm:p-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/10 text-white transition-all hover:scale-105 cursor-pointer flex items-center gap-1 text-[10px] sm:text-xs font-extrabold"
+              title="Logout Partner Dashboard"
             >
-              <LogOut className="w-4 h-4 sm:w-5 sm:h-5" />
+              <LogOut className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              <span className="hidden sm:inline">Logout</span>
             </button>
           </div>
         </div>
@@ -311,7 +461,7 @@ export default function UserPanel({
           <div className="bg-white border rounded-2xl p-4 shadow-sm space-y-1">
             <div className="p-3 border-b border-slate-100 mb-2">
               <h4 className="font-extrabold text-sm text-slate-900 leading-none">{currentUser.name}</h4>
-              <p className="text-[10px] text-pink-600 font-bold mt-1 tracking-wider uppercase">{currentUser.idCode}</p>
+              <p className="text-[10px] text-pink-600 font-bold mt-1 tracking-wider uppercase">{formatResellerId(currentUser, users)}</p>
             </div>
 
             <button 
@@ -331,6 +481,12 @@ export default function UserPanel({
               className={`w-full text-left px-4 py-3 rounded-xl text-xs font-bold transition-all flex items-center gap-3.5 cursor-pointer ${activeTab === 'wallet' ? 'bg-pink-500 text-white shadow-md shadow-pink-500/10' : 'text-slate-600 hover:bg-slate-50'}`}
             >
               <Wallet className="w-4 h-4" /> My Wallet
+            </button>
+            <button 
+              onClick={() => setActiveTab('referral')}
+              className={`w-full text-left px-4 py-3 rounded-xl text-xs font-bold transition-all flex items-center gap-3.5 cursor-pointer ${activeTab === 'referral' ? 'bg-pink-500 text-white shadow-md shadow-pink-500/10' : 'text-slate-600 hover:bg-slate-50'}`}
+            >
+              <Users className="w-4 h-4" /> Refer & Team Network
             </button>
             <button 
               onClick={() => setActiveTab('profile')}
@@ -387,6 +543,69 @@ export default function UserPanel({
                 exit={{ opacity: 0, y: -10 }}
                 className="space-y-6"
               >
+                {/* Reseller-only Interactive Promo Banner Slider */}
+                {resellerBanners && resellerBanners.length > 0 && (
+                  <div 
+                    onTouchStart={handleResellerTouchStart}
+                    onTouchMove={handleResellerTouchMove}
+                    onTouchEnd={handleResellerTouchEnd}
+                    onMouseDown={handleResellerMouseDown}
+                    onMouseUp={handleResellerMouseUp}
+                    onMouseLeave={handleResellerMouseLeave}
+                    className="relative overflow-hidden rounded-3xl border border-slate-200/80 shadow-2xs aspect-[12/5] sm:aspect-auto sm:h-[220px] md:h-[320px] lg:h-[365px] bg-slate-55 select-none cursor-grab active:cursor-grabbing"
+                  >
+                    <div 
+                      className="h-full flex w-full transition-transform duration-500 ease-in-out pointer-events-none"
+                      style={{ 
+                        transform: `translateX(-${(currentResellerBannerIdx % resellerBanners.length) * 100}%)`
+                      }}
+                    >
+                      {resellerBanners.map(ban => (
+                        <div key={ban.id} className="h-full w-full flex-shrink-0 relative overflow-hidden pointer-events-auto">
+                          {ban.link ? (
+                            <a 
+                              href={ban.link} 
+                              target="_blank" 
+                              rel="noopener noreferrer" 
+                              className="block h-full w-full cursor-pointer hover:opacity-95 transition-opacity"
+                              title="Campaign link"
+                            >
+                              <img 
+                                src={ban.img} 
+                                alt="Reseller Announcement Banner" 
+                                className="w-full h-full object-cover select-none pointer-events-none" 
+                                onDragStart={(e) => e.preventDefault()}
+                              />
+                            </a>
+                          ) : (
+                            <img 
+                              src={ban.img} 
+                              alt="Reseller Announcement Banner" 
+                              className="w-full h-full object-cover select-none pointer-events-none" 
+                              onDragStart={(e) => e.preventDefault()}
+                            />
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    {/* Tiny dots indicator overlay */}
+                    {resellerBanners.length > 1 && (
+                      <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1.5 z-15 bg-black/30 px-2 py-1 rounded-full backdrop-blur-3xs">
+                        {resellerBanners.map((_, idx) => (
+                          <button
+                            key={idx}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setCurrentResellerBannerIdx(idx);
+                            }}
+                            className={`w-1.5 h-1.5 rounded-full transition-all cursor-pointer ${idx === currentResellerBannerIdx ? 'bg-pink-500 w-3' : 'bg-white/60 hover:bg-white/95'}`}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Mobile Collections Carousel Filter */}
                 <div className="md:hidden space-y-2">
                   <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block px-1">Products Category</span>
@@ -494,12 +713,36 @@ export default function UserPanel({
                 exit={{ opacity: 0, y: -10 }}
                 className="space-y-4"
               >
-                <div className="flex justify-between items-center mb-1">
+                <div className="flex flex-wrap justify-between items-center gap-2 mb-1">
                   <h3 className="font-extrabold text-base text-slate-900 tracking-tight">E-commerce Delivery Records</h3>
                   <span className="text-xs bg-white py-1 px-2.5 rounded-full border text-slate-500 font-bold">
                     {myOrders.length} active orders
                   </span>
                 </div>
+
+                {/* Sub-Filters Tabs for orderFilter */}
+                {myOrders.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 bg-slate-100/60 p-2 rounded-2xl border border-slate-200 animate-fade-in">
+                    {(['all', 'Pending', 'Approved', 'Processing', 'Shipped', 'Delivered', 'Cancelled', 'Returned'] as const).map(f => {
+                      const count = f === 'all' 
+                        ? myOrders.length
+                        : myOrders.filter(o => o.status === f).length;
+                      return (
+                        <button
+                          key={f}
+                          onClick={() => setOrderFilter(f)}
+                          className={`px-3 py-1.5 rounded-xl text-[10.5px] font-extrabold transition-all border leading-none cursor-pointer ${
+                            orderFilter === f 
+                              ? 'bg-gradient-to-r from-pink-500 to-rose-500 text-white border-pink-500 shadow-xs' 
+                              : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-600'
+                          }`}
+                        >
+                          {f === 'all' ? 'All Orders' : f === 'Pending' ? 'Pending' : f === 'Approved' ? 'Approved' : f === 'Processing' ? 'Processing' : f === 'Shipped' ? 'Shipped' : f === 'Delivered' ? 'Delivered' : f === 'Cancelled' ? 'Cancelled' : 'Returned'} ({count})
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
 
                 {myOrders.length === 0 ? (
                   <div className="bg-white border rounded-2xl p-10 text-center shadow-sm">
@@ -507,15 +750,23 @@ export default function UserPanel({
                     <h4 className="font-bold text-slate-500">No placed orders yet</h4>
                     <p className="text-xs text-slate-400 mt-0.5">Place customer orders from the product catalog.</p>
                   </div>
+                ) : filteredMyOrders.length === 0 ? (
+                  <div className="bg-white border rounded-2xl p-10 text-center shadow-sm">
+                    <Package className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+                    <h4 className="font-bold text-slate-500">No matching orders found</h4>
+                    <p className="text-xs text-slate-400 mt-0.5">No orders with status "{orderFilter}" were found.</p>
+                  </div>
                 ) : (
                   <div className="space-y-3.5">
-                    {myOrders.map(ord => {
+                    {filteredMyOrders.map(ord => {
                       const finalStatusColor = {
                         Pending: 'bg-amber-100 text-amber-700 border-amber-200',
                         Approved: 'bg-indigo-100 text-indigo-700 border-indigo-200',
                         Processing: 'bg-pink-100 text-pink-700 border-pink-200',
                         Shipped: 'bg-sky-100 text-sky-700 border-sky-200',
-                        Delivered: 'bg-emerald-100 text-emerald-700 border-emerald-200'
+                        Delivered: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+                        Cancelled: 'bg-rose-100 text-rose-700 border-rose-200',
+                        Returned: 'bg-purple-100 text-purple-700 border-purple-200'
                       }[ord.status] || 'bg-slate-100';
 
                       return (
@@ -540,7 +791,7 @@ export default function UserPanel({
                           </div>
 
                           {/* Row 2 shipment logistics */}
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-2 bg-slate-50 p-2 rounded-lg border border-slate-100/50 text-[10.5px] text-slate-600">
+                          <div className="grid grid-cols-1 md:grid-cols-4 gap-2 bg-slate-50 p-2 rounded-lg border border-slate-100/50 text-[10.5px] text-slate-600">
                             <div>
                               <p className="text-[8px] text-slate-450 font-black uppercase tracking-wider">PRODUCT DETAILS</p>
                               <p className="font-bold text-slate-800 truncate mt-0.5">{ord.productName}</p>
@@ -561,6 +812,9 @@ export default function UserPanel({
                               <p className="font-medium text-slate-500 mt-0.5 line-clamp-1 truncate" title={ord.custAddress}>
                                 {ord.custAddress}
                               </p>
+                            </div>
+                            <div className="md:border-l md:pl-2.5 border-slate-200">
+                              <TinyInvoiceDetails order={ord} />
                             </div>
                           </div>
 
@@ -674,89 +928,148 @@ export default function UserPanel({
                 exit={{ opacity: 0, y: -10 }}
                 className="space-y-6"
               >
-                {/* Summary Info - Premium Branded Board */}
-                <div className="relative overflow-hidden bg-white border border-slate-200/80 rounded-3xl shadow-xs p-6 md:p-8 flex flex-col sm:flex-row gap-6 items-center text-slate-800">
-                  {/* Visual ambient gradients */}
-                  <div className="absolute -right-8 -top-8 w-32 h-32 bg-pink-500/5 rounded-full blur-2xl pointer-events-none" />
-                  <div className="absolute -left-8 -bottom-8 w-32 h-32 bg-indigo-500/5 rounded-full blur-2xl pointer-events-none" />
+                {/* Summary Info - Hot Pink Premium Branded Board */}
+                <div className="relative overflow-hidden bg-[#e6005c] rounded-3xl shadow-lg p-6 sm:p-8 flex flex-col lg:flex-row gap-6 md:gap-8 justify-between items-start md:items-center text-white min-h-[240px] font-sans">
+                  {/* Visual ambient glassmorphism shine highlights */}
+                  <div className="absolute right-0 top-0 w-80 h-80 bg-white/5 rounded-full blur-3xl pointer-events-none" />
+                  <div className="absolute left-1/3 bottom-0 w-64 h-64 bg-pink-400/15 rounded-full blur-2xl pointer-events-none" />
 
-                  {/* Editable Profile Avatar */}
-                  <div className="relative group shrink-0">
-                    <div className="w-20 h-20 rounded-2xl overflow-hidden ring-4 ring-pink-500/10 ring-offset-4 ring-offset-white bg-pink-50 flex items-center justify-center text-2xl font-black text-pink-600 transition-all duration-300 group-hover:scale-105 group-hover:ring-pink-500/30 shadow-md relative border border-pink-100">
-                      {currentUser.avatarUrl ? (
-                        <img 
-                          src={currentUser.avatarUrl} 
-                          alt={currentUser.name} 
-                          className="w-full h-full object-cover animate-fade-in"
-                          referrerPolicy="no-referrer"
-                        />
-                      ) : (
-                        currentUser.name.charAt(0).toUpperCase()
-                      )}
-                    </div>
-                    {/* Camera upload overlay trigger */}
-                    <label className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 backdrop-blur-3xs rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300 cursor-pointer text-white">
-                      <Camera className="w-5 h-5 text-pink-400 animate-pulse" />
-                      <span className="text-[8px] font-black uppercase mt-1 tracking-wider text-pink-350">Upload</span>
-                      <input 
-                        type="file" 
-                        accept="image/*" 
-                        className="hidden" 
-                        onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (file) {
-                            if (file.size > 2 * 1024 * 1024) {
-                              showNotif("Image size must be less than 2MB.", "error");
-                              return;
-                            }
-                            const reader = new FileReader();
-                            reader.onload = () => {
-                              const base64 = reader.result as string;
-                              const updatedUser = {
-                                ...currentUser,
-                                avatarUrl: base64
-                              };
-                              setUsers(prev => prev.map(u => u.id === currentUser.id ? updatedUser : u));
-                              setCurrentUser(updatedUser);
-                              showNotif("Reseller profile photo updated successfully!", "success");
-                            };
-                            reader.readAsDataURL(file);
-                          }
-                        }}
-                      />
-                    </label>
-                  </div>
-
-                  {/* Reseller Profile Info Texts */}
-                  <div className="flex-1 text-center sm:text-left space-y-1.5 z-10">
-                    <div className="flex flex-col sm:flex-row sm:items-center gap-2.5 justify-center sm:justify-start">
-                      <h3 className="font-extrabold text-xl text-slate-900 tracking-tight leading-none">
-                        {currentUser.name}
-                      </h3>
-                      <div className="flex items-center gap-1.5 justify-center sm:justify-start">
-                        <span className="bg-pink-50 text-pink-600 border border-pink-200/50 px-2.5 py-0.5 rounded-full text-[9px] font-black tracking-widest uppercase">
-                          RESELLER AGENT
-                        </span>
-                        {currentUser.kyc.status === 'verified' && (
-                          <span className="bg-emerald-50 text-emerald-700 border border-emerald-200/50 px-2 py-0.5 rounded-full text-[9px] font-black tracking-widest uppercase flex items-center gap-0.5">
-                            <ShieldCheck className="w-3 h-3 text-emerald-600" /> VERIFIED
-                          </span>
+                  {/* Left Column: Business & Person metadata block */}
+                  <div className="flex flex-col sm:flex-row items-center sm:items-start gap-5 sm:gap-6 w-full lg:w-auto">
+                    {/* Circle shop/profile logo container with black background matching image */}
+                    <div className="relative shrink-0 select-none">
+                      <div className="w-[100px] h-[100px] sm:w-[110px] sm:h-[110px] rounded-full overflow-hidden bg-[#090912] flex items-center justify-center p-3 border-2 border-white/20 shadow-md relative group hover:border-white/40 transition-colors">
+                        {currentUser.avatarUrl ? (
+                          <img 
+                            src={currentUser.avatarUrl} 
+                            alt={currentUser.name} 
+                            className="w-full h-full object-cover rounded-full pointer-events-none"
+                            referrerPolicy="no-referrer"
+                          />
+                        ) : (
+                          <div className="flex flex-col items-center justify-center text-center">
+                            <span className="text-[17px] sm:text-[19px] font-black text-pink-500 tracking-tighter">AGC</span>
+                            <span className="text-[7.5px] font-bold text-slate-400 uppercase tracking-widest mt-0.5 leading-none">AUTHENTIC</span>
+                          </div>
                         )}
                       </div>
+
+                      {/* Photo upload trigger - exact camera/edit pen badge overlay */}
+                      <label className="absolute -top-1 -right-1 flex items-center justify-center bg-pink-500 hover:bg-pink-600 border border-white/30 w-7 h-7 rounded-full cursor-pointer text-white shadow-md active:scale-90 transition-all">
+                        <Camera className="w-3.5 h-3.5" />
+                        <input 
+                          type="file" 
+                          accept="image/*" 
+                          className="hidden" 
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              if (file.size > 2 * 1024 * 1024) {
+                                showNotif("Image size must be less than 2MB.", "error");
+                                return;
+                              }
+                              const reader = new FileReader();
+                              reader.onload = () => {
+                                const base64 = reader.result as string;
+                                const updatedUser = {
+                                  ...currentUser,
+                                  avatarUrl: base64
+                                };
+                                setUsers(prev => prev.map(u => u.id === currentUser.id ? updatedUser : u));
+                                setCurrentUser(updatedUser);
+                                showNotif("Reseller profile photo updated successfully!", "success");
+                              };
+                              reader.readAsDataURL(file);
+                            }
+                          }}
+                        />
+                      </label>
                     </div>
 
-                    <p className="text-slate-500 text-xs font-semibold">{currentUser.email}</p>
+                    {/* Reseller Info Metadata List */}
+                    <div className="flex-1 text-center sm:text-left space-y-2 mt-1">
+                      {/* Shop/Agency brand header name */}
+                      <h3 className="font-extrabold text-xl sm:text-2xl text-white tracking-tight drop-shadow-xs">
+                        {currentUser.name === "Reseller Demo User" ? "Authentic Gadgets Care" : currentUser.name}
+                      </h3>
 
-                    <div className="flex flex-wrap gap-2 items-center justify-center sm:justify-start pt-1.5">
-                      <span className="text-[9.5px] font-mono font-black bg-slate-100 text-slate-700 px-2.5 py-1 rounded-md border border-slate-200/40">
-                        ID: {currentUser.idCode}
-                      </span>
-                      <span className="text-[9.5px] font-mono font-black bg-pink-50 text-pink-700 px-2.5 py-1 rounded-md border border-pink-100 flex items-center gap-0.5">
-                        <DollarSign className="w-3 h-3 text-pink-500 shrink-0" /> wallet: ৳{currentUser.balance}
-                      </span>
+                      <div className="space-y-1 text-white/95 text-xs sm:text-[13px] font-semibold tracking-wide">
+                        {/* ID Code with Copy option */}
+                        <div className="flex items-center justify-center sm:justify-start gap-1">
+                          <span>ID: {formatResellerId(currentUser, users)}</span>
+                          <button
+                            onClick={() => {
+                              navigator.clipboard.writeText(formatResellerId(currentUser, users));
+                              showNotif("ID Code copied successfully!", "success");
+                            }}
+                            className="p-1 hover:bg-white/15 rounded-md text-white/80 hover:text-white cursor-pointer active:scale-95 transition-all"
+                            title="Copy ID Code"
+                          >
+                            <Copy className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+
+                        {/* User real name display */}
+                        <p>Name: {currentUser.kyc.nidName || "Md Mobarok Khondokar HRidoy"}</p>
+
+                        {/* Customer contact phone */}
+                        <p>Phone: {currentUser.phone || "01307559032"}</p>
+
+                        {/* Dynamic Kyc status label */}
+                        <p>
+                          Status: <span className="font-extrabold text-[#74f884] uppercase drop-shadow-xs">
+                            {currentUser.kyc.status === 'verified' ? 'VERIFIED' : currentUser.kyc.status.toUpperCase()}
+                          </span>
+                        </p>
+
+                        {/* Modern Share button matching image */}
+                      <div className="pt-2 flex justify-center sm:justify-start">
+                        <button
+                          onClick={async () => {
+                            const refLink = `${window.location.origin}/?ref=${formatResellerId(currentUser, users)}`;
+                            
+                            // Copy to clipboard
+                            try {
+                              await navigator.clipboard.writeText(refLink);
+                              showNotif("Profile referral link copied! You can now share it with others.", "success");
+                            } catch (err) {
+                              console.error("Clipboard copy failed", err);
+                            }
+
+                            // Use Web Share API if supported to allow sharing
+                            if (navigator.share) {
+                              try {
+                                await navigator.share({
+                                  title: 'Join Dealy Affiliate / Reseller Program',
+                                  text: `Check out Dealy's amazing earning Reseller Program! Register using my ref link.`,
+                                  url: refLink,
+                                });
+                              } catch (err) {
+                                console.log("User cancelled share or share failed", err);
+                              }
+                            }
+                          }}
+                          className="inline-flex items-center gap-1.5 bg-white text-slate-800 px-4 py-1.5 sm:py-2 rounded-xl text-xs font-bold shadow-xs hover:bg-slate-100 active:scale-95 transition-all select-none cursor-pointer"
+                        >
+                          <Share2 className="w-3.5 h-3.5 text-pink-600" />
+                          <span>Share</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Right Column: Subscription countdown (no grid stats) */}
+                  <div className="w-full lg:w-auto flex flex-col items-center lg:items-end justify-center">
+                    {/* Subscription countdown line at extreme bottom right of banner */}
+                    <div className="text-center lg:text-right w-full pr-1">
+                      <p className="text-[10px] text-white/70 font-semibold uppercase tracking-wider">Subscription ends on:</p>
+                      <p className="text-sm sm:text-base text-white font-extrabold mt-1">
+                        {getSubscriptionCountdown(currentUser.subscriptionExpiresAt)}
+                      </p>
                     </div>
                   </div>
                 </div>
+              </div>
 
                 {/* Identity Verification Portal */}
                 <div className="bg-white border rounded-2xl shadow-sm overflow-hidden">
@@ -848,6 +1161,148 @@ export default function UserPanel({
                   </div>
                 </div>
 
+              </motion.div>
+            )}
+
+            {/* 4.5 DEDICATED REFERRAL NETWORK PAGE */}
+            {activeTab === 'referral' && (
+              <motion.div 
+                key="referral" 
+                initial={{ opacity: 0, y: 10 }} 
+                animate={{ opacity: 1, y: 0 }} 
+                exit={{ opacity: 0, y: -10 }}
+                className="space-y-6 animate-fade-in font-sans"
+              >
+                <div id="reseller-referral-system" className="bg-white border rounded-2xl shadow-sm overflow-hidden space-y-5 p-5 md:p-6 text-slate-800">
+                  <div className="border-b pb-4 flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-pink-50 flex items-center justify-center border border-pink-100 shrink-0">
+                      <Users className="w-5 h-5 text-pink-500" />
+                    </div>
+                    <div>
+                      <h4 className="font-extrabold text-slate-900 text-xs sm:text-sm tracking-tight uppercase">Referral & Team Network (রেফারেল ও টিম নেটওয়ার্ক)</h4>
+                      <p className="text-[10px] text-slate-400 mt-0.5">আপনার রেফারেল লিংক ব্যবহার করে অন্য রিসেলারদের যুক্ত করুন ও আজীবন ওয়ান-ক্লিক কমিশন ইনকাম করুন।</p>
+                    </div>
+                  </div>
+
+                  {/* Highlights Summary Grid */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="bg-gradient-to-br from-pink-50 to-pink-100/30 border border-pink-100 p-4 rounded-xl flex items-center justify-between">
+                      <div>
+                        <span className="text-[10px] font-black uppercase text-pink-600 tracking-wider">Total Active Teammates</span>
+                        <h4 className="text-xl font-black text-slate-800 font-mono mt-1">
+                          {(users || []).filter(u => u.referredBy === currentUser.idCode).length} Teammates
+                        </h4>
+                      </div>
+                      <div className="bg-pink-100 text-pink-650 w-9 h-9 rounded-lg flex items-center justify-center font-black shrink-0">
+                        <Users className="w-4 h-4" />
+                      </div>
+                    </div>
+
+                    <div className="bg-gradient-to-br from-emerald-50 to-emerald-100/30 border border-emerald-100 p-4 rounded-xl flex items-center justify-between">
+                      <div>
+                        <span className="text-[10px] font-black uppercase text-emerald-600 tracking-wider">Lifetime Team Earnings</span>
+                        <h4 className="text-xl font-black text-slate-850 font-mono mt-1">
+                          ৳{(currentUser.activities || [])
+                            .filter(act => act.type === 'profit' && act.desc.toLowerCase().includes('referral'))
+                            .reduce((sum, act) => sum + act.amount, 0)}
+                        </h4>
+                      </div>
+                      <div className="bg-emerald-100 text-emerald-750 w-9 h-9 rounded-lg flex items-center justify-center font-black shrink-0">
+                        <DollarSign className="w-4 h-4 text-emerald-650 shrink-0" />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Referral Links Operations box  */}
+                  <div className="space-y-4 bg-slate-50 border rounded-xl p-4 text-slate-800 text-xs font-semibold">
+                    <div className="space-y-1">
+                      <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">My Referral RES Code</span>
+                      <div className="flex gap-2">
+                        <input 
+                          type="text" 
+                          readOnly 
+                          value={formatResellerId(currentUser, users)} 
+                          className="font-mono font-bold bg-white border border-slate-200 rounded-lg px-3 py-2 flex-1 focus:outline-none focus:ring-0 text-slate-900 shadow-sm"
+                        />
+                        <button 
+                          id="btn-copy-ref-code"
+                          onClick={() => {
+                            navigator.clipboard.writeText(formatResellerId(currentUser, users));
+                            setCopiedCode(true);
+                            setTimeout(() => setCopiedCode(false), 2000);
+                            showNotif("Referral Code Copied!", "success");
+                          }}
+                          className="bg-slate-800 text-white font-bold px-4 py-2 rounded-lg text-xs hover:bg-slate-700 active:scale-95 transition-all text-center shrink-0 cursor-pointer flex items-center gap-1.5 shadow-sm"
+                        >
+                          {copiedCode ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                          <span>{copiedCode ? 'Copied' : 'Copy'}</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">Shareable Registration Link</span>
+                      <div className="flex gap-2">
+                        <input 
+                          type="text" 
+                          readOnly 
+                          value={`${window.location.origin}/?ref=${formatResellerId(currentUser, users)}`} 
+                          className="font-mono text-xs bg-white border border-slate-200 rounded-lg px-3 py-2 flex-1 focus:outline-none focus:ring-0 text-slate-500 truncate shadow-sm"
+                        />
+                        <button 
+                          id="btn-copy-ref-link"
+                          onClick={() => {
+                            navigator.clipboard.writeText(`${window.location.origin}/?ref=${formatResellerId(currentUser, users)}`);
+                            setCopiedLink(true);
+                            setTimeout(() => setCopiedLink(false), 2000);
+                            showNotif("Referral Link Copied!", "success");
+                          }}
+                          className="bg-pink-500 hover:bg-pink-600 text-white font-bold px-4 py-2 rounded-lg text-xs active:scale-95 transition-all text-center shrink-0 cursor-pointer flex items-center gap-1.5 shadow-sm shadow-pink-500/10"
+                        >
+                          {copiedLink ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Share2 className="w-3.5 h-3.5" />}
+                          <span>{copiedLink ? 'Copied' : 'Copy'}</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Teammates List */}
+                  <div className="border border-slate-150 rounded-xl overflow-hidden text-xs">
+                    <div className="bg-slate-50 border-b px-4 py-2.5 flex justify-between items-center">
+                      <span className="font-extrabold text-[10px] uppercase text-slate-400 tracking-wider">Approved Reseller Team Members</span>
+                      <span className="bg-pink-50 text-pink-650 px-2 py-0.5 rounded-md font-black text-[9px] uppercase tracking-wider font-mono">
+                        {(users || []).filter(u => u.referredBy === currentUser.idCode).length} Join(s)
+                      </span>
+                    </div>
+
+                    <div className="divide-y max-h-60 overflow-y-auto bg-white">
+                      {(users || []).filter(u => u.referredBy === currentUser.idCode).length === 0 ? (
+                        <div className="py-10 px-4 text-center space-y-1.5">
+                          <Users className="w-8 h-8 text-slate-300 mx-auto" />
+                          <p className="text-slate-500 font-bold">কোনো মেম্বার জয়েন করেনি</p>
+                          <p className="text-[10px] text-slate-400 font-medium">আজই আপনার রেজিস্টার লিংক শেয়ার করে একটি টিম তৈরি করুন!</p>
+                        </div>
+                      ) : (
+                        (users || []).filter(u => u.referredBy === currentUser.idCode).map((teamUsr) => (
+                          <div key={teamUsr.id} className="p-3 bg-white hover:bg-slate-50/50 flex items-center justify-between font-sans transition-colors">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <div className="w-7 h-7 rounded-lg bg-pink-50 flex items-center justify-center font-bold text-pink-600 text-xs shrink-0 border border-pink-100">
+                                {teamUsr.name.substring(0, 1).toUpperCase()}
+                              </div>
+                              <div className="min-w-0 leading-tight">
+                                <span className="block font-black text-slate-850 truncate text-[11px]">{teamUsr.name}</span>
+                                <span className="text-[9.5px] text-slate-450 font-mono italic mt-0.5 block">{teamUsr.phone || 'N/A Phone'}</span>
+                              </div>
+                            </div>
+                            <span className="font-mono bg-slate-100 text-slate-700 px-2.5 py-1 rounded border font-black text-[9.5px] shrink-0">
+                              {formatResellerId(teamUsr, users)}
+                            </span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
               </motion.div>
             )}
 
@@ -955,7 +1410,7 @@ export default function UserPanel({
       </div>
 
       {/* FOOTER MOBILE NAVIGATION RIG */}
-      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t z-50 flex justify-around items-center h-16 shadow-[0_-4px_12px_rgba(0,0,0,0.06)] px-2">
+      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t z-50 flex justify-around items-center h-16 shadow-[0_-4px_12px_rgba(0,0,0,0.06)] px-1.5">
         <button 
           onClick={() => setActiveTab('shop')} 
           className={`flex flex-col items-center justify-center flex-1 py-1 ${activeTab === 'shop' ? 'text-pink-500 font-extrabold' : 'text-slate-400'}`}
@@ -968,7 +1423,7 @@ export default function UserPanel({
           className={`flex flex-col items-center justify-center flex-1 py-1 relative ${activeTab === 'orders' ? 'text-pink-500 font-extrabold' : 'text-slate-400'}`}
         >
           <Package className="w-5 h-5" />
-          <span className="text-[9px] mt-0.5 font-bold uppercase tracking-wider">Tracking</span>
+          <span className="text-[9px] mt-0.5 font-bold uppercase tracking-wider">Orders</span>
         </button>
         <button 
           onClick={() => setActiveTab('wallet')} 
@@ -978,11 +1433,18 @@ export default function UserPanel({
           <span className="text-[9px] mt-0.5 font-bold uppercase tracking-wider">Wallet</span>
         </button>
         <button 
+          onClick={() => setActiveTab('referral')} 
+          className={`flex flex-col items-center justify-center flex-1 py-1 relative ${activeTab === 'referral' ? 'text-pink-500 font-extrabold' : 'text-slate-400'}`}
+        >
+          <Users className="w-5 h-5" />
+          <span className="text-[9px] mt-0.5 font-bold uppercase tracking-wider">Refer</span>
+        </button>
+        <button 
           onClick={() => setActiveTab('profile')} 
           className={`flex flex-col items-center justify-center flex-1 py-1 ${activeTab === 'profile' ? 'text-pink-500 font-extrabold' : 'text-slate-400'}`}
         >
           <UserIcon className="w-5 h-5" />
-          <span className="text-[9px] mt-0.5 font-bold uppercase tracking-wider">Identity</span>
+          <span className="text-[9px] mt-0.5 font-bold uppercase tracking-wider">NID</span>
         </button>
         <button 
           onClick={() => setActiveTab('support')} 
